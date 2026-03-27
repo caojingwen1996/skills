@@ -1,136 +1,139 @@
 ---
 name: cjw-xueqiu-daily-monitor
-description: Use when the user wants to manually collect same-day posts from one or more specified Xueqiu account homepages, rerun the same date without duplicate capture, or generate end-of-day Markdown summaries from the collected raw files.
+description: Use when the user wants to manually collect same-day posts from one or more specified Xueqiu account homepages, rerun the same date without duplicate capture, or generate end-of-day Markdown summaries from saved raw files.
 ---
 
 # Xueqiu Daily Monitor
 
-## Overview
+Manual same-day Xueqiu monitoring workflow for configured account homepages.
 
-This skill is the entrypoint for the current Xueqiu daily monitor workflow.
+Use this skill to load account configuration from `EXTEND.md`, run one manual capture pass per start, reuse state for same-day reruns, and generate Markdown summaries from saved raw files.
 
-It should be used to identify the right files, respect the current operating model, and follow the documented workflow instead of improvising a new one.
+## Workflow
 
-Detailed workflow rules live in `workflow.md`. `SKILL.md` only defines when to use the skill, which files are authoritative, and what boundaries must be respected.
+```text
+- [ ] Step 1: Pre-check `EXTEND.md` and confirm task inputs
+- [ ] Step 2: Confirm target date and run mode
+- [ ] Step 3: Run one capture pass for each enabled account
+- [ ] Step 4: Reuse same-day state for reruns
+- [ ] Step 5: Generate Markdown summaries from saved raw files
+- [ ] Step 6: Finalize and report output locations
+```
 
-## When To Use
+## Step 1: Pre-check
 
-Use this skill when the user wants any of the following:
+### 1.1 Load `EXTEND.md` ⛔ BLOCKING
 
-- start a same-day Xueqiu capture task manually
-- collect posts for one or more configured bloggers
-- rerun the same day and only add newly published posts
-- generate end-of-day Markdown summaries
-- inspect where raw files, intermediate files, and final summaries should live
+Before any capture preparation:
 
-Do not use this skill for generic browser automation unrelated to Xueqiu monitoring.
+- read `EXTEND.md`
+- list the current enabled accounts, disabled accounts, URLs, notes, manual rules, date rule, and output preferences
+- ask whether the user wants to supplement or correct the configuration
 
-## Resources
+Do not continue until the user explicitly confirms no additions are needed or the `EXTEND.md` update is complete.
 
-Resolve the skill root as `{baseDir}` and use these files:
+Full procedure: [references/workflow.md](references/workflow.md#step-1-pre-check)
 
-- workflow guide and detailed procedure: `{baseDir}/workflow.md`
-- account list: `{baseDir}/EXTEND.md`
-- browser helpers: `{baseDir}/scripts/utils.py`
-- single-account capture: `{baseDir}/scripts/content_task.py`
-- task state and dedupe: `{baseDir}/scripts/task_store.py`
-- end-of-day summaries: `{baseDir}/scripts/daily_summary.py`
-- file layout reference: `{baseDir}/references/file-layout.md`
+### 1.2 Validate task inputs
 
-If you need detailed step-by-step execution order, read `workflow.md` first and treat it as the authoritative process document.
+Confirm:
 
-## Core Rules
+- at least one account is `enabled`
+- each enabled account has a valid Xueqiu homepage URL
+- the target date is explicit
+- the Chrome persistent profile is available or the operator is ready to log in manually
 
-1. Manual start only
-- Do not auto-start capture.
+If configuration or environment is incomplete, stop and ask the user to fix it first.
 
-2. Pre-start operator confirmation
-- Before any capture preparation, read `EXTEND.md`, list the current configuration to the user, and ask whether any accounts, links, notes, or related manual rules need to be supplemented or corrected.
-- Do not proceed until the user confirms no additions are needed or the `EXTEND.md` update is complete.
+## Step 2: Confirm run mode
 
-3. Account source of truth
-- Read enabled blogger homepages from `EXTEND.md`.
+Determine whether this start is:
 
-4. Same-day scope
-- Work is scoped to one explicit target date.
+- a first pass for the date, or
+- a same-day rerun that must reuse existing state
 
-5. Same-day rerun is incremental
-- Reuse existing state and do not duplicate processed items.
+Use `scripts/task_store.py` state files as the source of truth for rerun detection.
 
-6. Capture and summary are separate
-- Raw capture comes first.
-- Final summaries are generated afterwards by `daily_summary.py`.
+Full procedure: [references/workflow.md](references/workflow.md#step-2-choose-date-and-run-mode)
 
-7. Preserve all layers
-- Keep raw outputs, intermediate processing outputs, and final summaries.
+## Step 3: Capture
 
-All detailed behavior for these rules is defined in `workflow.md`.
+Run exactly one capture pass per manual start.
 
-## Responsibilities By File
+- use `scripts/content_task.py` for single-account, single-date capture
+- only process posts for the target date
+- save raw `.txt` files, logs, and state
+- do not start automatic loops or hourly scans
 
-- `EXTEND.md`
-  - manual account list
-  - enabled or disabled status
-  - homepage URLs
+Command details: [references/usage.md](references/usage.md#capture-commands)
 
-- `scripts/content_task.py`
-  - single-account, single-date raw capture
-  - raw `.txt` output and business logs
+## Step 4: Same-day reruns
 
-- `scripts/task_store.py`
-  - same-day task state
-  - deduplication source of truth
-  - scan and failure bookkeeping
+Same-day reruns are incremental only.
 
-- `scripts/daily_summary.py`
-  - read raw outputs for one day
-  - preserve intermediate files under `output/processing/{yyyymmdd}/`
-  - write final Markdown summaries under `output/summaries/{yyyymmdd}/`
+- read the existing state
+- keep processed items as the deduplication source of truth
+- save only newly discovered posts
+- do not overwrite existing raw files
 
-- `workflow.md`
-  - authoritative step-by-step operating procedure
-  - start, rerun, dedupe, summary, and output layout rules
+Full procedure: [references/workflow.md](references/workflow.md#step-4-same-day-rerun)
 
-## Summary Structure
+## Step 5: Summary generation
 
-Both per-blogger and combined summaries must use Markdown.
+After capture is considered complete for the day:
 
-Required sections:
+- run `scripts/daily_summary.py`
+- preserve intermediate analysis files
+- write final Markdown results separately from intermediate files
 
-1. `核心内容`
-- answer what was said
-- keep the main viewpoints, signals, and explicit statements
+Summary format: [references/summary-format.md](references/summary-format.md)
 
-2. `背景语境`
-- answer why those statements appeared that day
-- include market context, events, earnings, price moves, short-selling pressure, or thread context when available
+## Step 6: Finalize
 
-3. `Spec相关`
-- only output when relevant
-- split into:
-  - `明确相关`
-  - `候选相关`
+Report:
 
-Current implementation may leave `明确相关` empty until real `spec` matching is added.
+- target date
+- number of processed authors
+- output root
+- summary directory
+- processing directory
+- any failures that still require human follow-up
 
-## Error Policy
+## Output Directory
 
-When these situations happen, stop and tell the user clearly before continuing:
+All outputs are organized under the selected output root. Repo-local examples in this skill use `{baseDir}/scripts/output`.
 
-- login expired
-- page abnormal
-- content empty
-- save failed
-- page structure changed
-- risk-control prompt appeared
+```text
+{output-root}/
+├── {author}_{yyyymmdd}.log
+├── {author}_{yyyymmdd}.state.json
+├── {author}_{yyyymmdd}/
+├── processing/{yyyymmdd}/
+└── summaries/{yyyymmdd}/
+```
 
-Do not silently continue through these failures. For exact operator flow, fallback handling, and output expectations, follow `workflow.md`.
+Detailed rules: [references/output-layout.md](references/output-layout.md)
 
 ## Do Not
 
 - Do not auto-start capture
-- Do not assume hourly scheduling exists
-- Do not overwrite existing raw files for already processed items
-- Do not mix intermediate files into `output/summaries/{yyyymmdd}/`
-- Do not claim `spec` matching is implemented beyond the current summary heuristics
+- Do not assume scheduling exists
 - Do not treat same-day reruns as fresh tasks
+- Do not mix intermediate files into `summaries/{yyyymmdd}/`
+- Do not claim `spec` matching exists beyond the current summary heuristics
+- Do not silently continue through login, page, save, or risk-control failures
+
+## References
+
+| File | Purpose |
+|------|---------|
+| [EXTEND.md](EXTEND.md) | Manual account configuration and start-of-task confirmation source |
+| [references/workflow.md](references/workflow.md) | Detailed operating procedure |
+| [references/usage.md](references/usage.md) | Script entrypoints and exact CLI usage |
+| [references/output-layout.md](references/output-layout.md) | Output root and directory-layer rules |
+| [references/summary-format.md](references/summary-format.md) | Required Markdown summary structure |
+| [references/error-policy.md](references/error-policy.md) | Failure handling and stop conditions |
+| [references/file-layout.md](references/file-layout.md) | Raw file naming and per-file content format |
+| [scripts/content_task.py](scripts/content_task.py) | Single-account capture |
+| [scripts/task_store.py](scripts/task_store.py) | State and deduplication utility |
+| [scripts/daily_summary.py](scripts/daily_summary.py) | End-of-day summary generator |

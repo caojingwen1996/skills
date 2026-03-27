@@ -1,23 +1,10 @@
 # Xueqiu Daily Monitor Extend
 
-## Purpose
+This file is the manual configuration layer for the Xueqiu daily monitor skill.
 
-This file is the manual configuration layer for the Xueqiu daily monitor workflow.
+Current scripts only parse the account list format. The other sections are operator preferences and workflow guidance that must be reviewed before each task starts.
 
-Current scope:
-
-- maintain account homepage URLs
-- control which accounts are enabled
-- describe manual-start operating rules
-
-Current non-goals:
-
-- no automatic scheduling
-- no secret storage
-- no runtime state
-- no summary output
-
-## Account List
+## Accounts
 
 Maintain accounts in the following format.
 
@@ -35,12 +22,12 @@ Maintain accounts in the following format.
 
 Rules:
 
-- `name` is the human-readable display name
-- `url` must be the Xueqiu account homepage URL
+- `name` is the human-readable account name
+- `url` must be the Xueqiu homepage URL
 - only `enabled` accounts are included in the daily workflow
-- `note` is optional and only for operator reference
+- `note` is optional and for operator context only
 
-## Manual Start Rule
+## Start Rules
 
 The workflow is manual-start only.
 
@@ -48,12 +35,12 @@ Current rule set:
 
 1. the operator decides when to start the day's capture
 2. one manual start performs one capture pass per enabled account
-3. if the operator starts the task again later on the same day, it is treated as a same-day rerun
-4. same-day reruns must reuse existing state and only capture new items
+3. a later start on the same day is treated as a same-day rerun
+4. same-day reruns must reuse existing state and only add newly discovered items
 
 ## Target Date Rule
 
-The task date is explicit.
+The task date must always be explicit.
 
 Typical usage:
 
@@ -61,35 +48,50 @@ Typical usage:
 - rerun: collect the same date again and only add new items
 - historical capture: manually specify an earlier date when needed
 
+## Output Preferences
+
+The current repo-local convention is:
+
+- preferred output root: `./scripts/output`
+- preferred Chrome profile: `./scripts/.xueqiu-chrome-profile`
+
+These are operator defaults for this repository. Capture and summary commands must point to the same output root for a given task date.
+
 ## Output Expectations
 
-Raw capture outputs live under:
+Within the selected output root:
 
-```text
-output/
-```
+- raw capture files live at the root layer
+- intermediate processing files live under `processing/{yyyymmdd}/`
+- final Markdown summaries live under `summaries/{yyyymmdd}/`
 
-Intermediate processing outputs live under:
-
-```text
-output/processing/{yyyymmdd}/
-```
-
-Final Markdown summaries live under:
-
-```text
-output/summaries/{yyyymmdd}/
-```
+Full directory rules: [references/output-layout.md](references/output-layout.md)
 
 ## Summary Structure Reminder
 
-Final summaries should be Markdown and use these three sections:
+Final summaries must be Markdown and use these sections:
 
 1. `核心内容`
 2. `背景语境`
 3. `Spec相关`
 
-`Spec相关` should be split into:
+`Spec相关` must be split into:
 
 - `明确相关`
 - `候选相关`
+
+Full summary rules: [references/summary-format.md](references/summary-format.md)
+
+## Pre-Start Confirmation
+
+Before any capture task starts, the operator must display and confirm:
+
+- enabled accounts
+- disabled accounts
+- account URLs
+- account notes when present
+- manual-start rules
+- target-date rule
+- output preferences and output expectations
+
+Then ask the user whether anything in this file needs to be supplemented or corrected before capture begins.
