@@ -1,0 +1,4 @@
+interface:
+  display_name: "cjw-xueqiu-daily-monitor"
+  short_description: "手动启动并增量抓取指定雪球账户当日内容"
+  default_prompt: "Use $cjw-xueqiu-daily-monitor to manually collect same-day posts for enabled Xueqiu accounts, reuse a persisted Chrome session, support same-day reruns without duplicate capture, and generate end-of-day Markdown summaries."
