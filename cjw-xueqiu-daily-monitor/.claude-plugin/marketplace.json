@@ -1,0 +1,20 @@
+{
+  "name": "cjw-xueqiu-daily-monitor",
+  "description": "雪球日常监控 - 抓取指定账号主页的当日帖子并生成 Markdown 汇总",
+  "owner": {
+    "name": "cjw",
+    "email": ""
+  },
+  "plugins": [
+    {
+      "name": "cjw-xueqiu-daily-monitor",
+      "description": "雪球日常监控 skill，用于抓取雪球帖子并生成汇总",
+      "version": "1.0.0",
+      "source": "./",
+      "author": {
+        "name": "cjw",
+        "email": ""
+      }
+    }
+  ]
+}

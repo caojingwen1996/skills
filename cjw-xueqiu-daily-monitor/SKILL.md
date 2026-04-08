@@ -1,139 +1,164 @@
 ---
 name: cjw-xueqiu-daily-monitor
-description: Use when the user wants to manually collect same-day posts from one or more specified Xueqiu account homepages, rerun the same date without duplicate capture, or generate end-of-day Markdown summaries from saved raw files.
+description: 当用户需要手动抓取一个或多个指定雪球账号主页的当日帖子、对同一天任务进行无重复补抓，或基于已保存的原始文本生成每位作者的 Markdown 汇总时使用。当用户说:“开启雪球任务” “抓取雪球帖子”时触发
 ---
 
-# Xueqiu Daily Monitor
+# 雪球日常监控
 
-Manual same-day Xueqiu monitoring workflow for configured account homepages.
+面向已配置账号主页的手动当日雪球监控流程。
 
-Use this skill to load account configuration from `EXTEND.md`, run one manual capture pass per start, reuse state for same-day reruns, and generate Markdown summaries from saved raw files.
+使用这个 skill 时，应从 `EXTEND.md` 读取账号配置，每次手动启动执行一轮抓取，在同日重跑时复用既有状态，并基于已保存的原始文本生成每位作者的 Markdown 汇总。
 
-## Workflow
+## 范围边界
+
+这个 skill 只定义雪球业务流程本身：
+
+- 账号配置与操作者确认
+- 目标日期解析
+- 同日重跑识别与去重
+- 原始文件和汇总输出要求
+
+当任务需要访问主页、复用登录态、进行页面交互或从雪球页面提取内容时，必须额外加载 `web-access`，并按该 skill 处理浏览器侧操作。
+
+这个 skill 不会重新定义已经属于 `web-access` 的通用浏览器或 CDP 流程。
+
+## 工作流
 
 ```text
-- [ ] Step 1: Pre-check `EXTEND.md` and confirm task inputs
-- [ ] Step 2: Confirm target date and run mode
-- [ ] Step 3: Run one capture pass for each enabled account
-- [ ] Step 4: Reuse same-day state for reruns
-- [ ] Step 5: Generate Markdown summaries from saved raw files
-- [ ] Step 6: Finalize and report output locations
+- [ ] 第 1 步：预检 `EXTEND.md` 并确认任务输入
+- [ ] 第 2 步：确认目标日期和运行模式
+- [ ] 第 3 步：对每个启用账号执行一轮抓取
+- [ ] 第 4 步：同日重跑时复用既有状态
+- [ ] 第 5 步：基于已保存的原始文本生成 Markdown 汇总
+- [ ] 第 6 步：收尾并汇报输出位置
 ```
 
-## Step 1: Pre-check
+## 第 1 步：预检
 
-### 1.1 Load `EXTEND.md` ⛔ BLOCKING
+### 1.1 读取 `EXTEND.md` ⛔ 阻塞项
 
-Before any capture preparation:
+在开始任何抓取准备前：
 
-- read `EXTEND.md`
-- list the current enabled accounts, disabled accounts, URLs, notes, manual rules, date rule, and output preferences
-- ask whether the user wants to supplement or correct the configuration
+- 读取 `EXTEND.md`
+- 列出当前启用账号、禁用账号、URL、备注、手动规则、日期规则和输出偏好
+- 询问用户是否需要补充或更正配置
+- 提供标准确认选项：
+  - `1. 需要补充或更正配置`
+  - `2. 不需要修改，按指定日期抓取 YYYY-MM-DD`
+  - `3. 不需要修改，按今天抓取`
 
-Do not continue until the user explicitly confirms no additions are needed or the `EXTEND.md` update is complete.
+在用户明确确认其中一个允许结果，或 `EXTEND.md` 更新完成之前，不要继续。
 
-Full procedure: [references/workflow.md](references/workflow.md#step-1-pre-check)
+完整流程见：[references/workflow.md](references/workflow.md#step-1-pre-check)
 
-### 1.2 Validate task inputs
+### 1.2 校验任务输入
 
-Confirm:
+确认：
 
-- at least one account is `enabled`
-- each enabled account has a valid Xueqiu homepage URL
-- the target date is explicit
-- the Chrome persistent profile is available or the operator is ready to log in manually
+- 至少有一个账号为 `enabled`
+- 每个启用账号都配置了有效的雪球主页 URL
+- 目标日期是明确的，或选项 `3` 已经被解析成绝对日期
+- Chrome 持久化 profile 可用，或操作者已准备好手动登录
 
-If configuration or environment is incomplete, stop and ask the user to fix it first.
+如果配置或环境不完整，停止执行并要求用户先修正。
 
-## Step 2: Confirm run mode
 
-Determine whether this start is:
 
-- a first pass for the date, or
-- a same-day rerun that must reuse existing state
+## 第 2 步：确认运行模式
 
-Use `scripts/task_store.py` state files as the source of truth for rerun detection.
+判断本次启动属于：
 
-Full procedure: [references/workflow.md](references/workflow.md#step-2-choose-date-and-run-mode)
+- 当天首次抓取，或
+- 必须复用既有当日输出的同日重跑
 
-## Step 3: Capture
+如果用户选择了 `3. 不需要修改，按今天抓取`，必须在判断运行模式前先把 `today` 解析成当前绝对日期。
 
-Run exactly one capture pass per manual start.
+使用现有的作者-日期目录，尤其是 `state.json`、`task.log` 和已保存的原始 `.txt` 文件，作为判断是否重跑的事实来源。
 
-- use `scripts/content_task.py` for single-account, single-date capture
-- only process posts for the target date
-- save raw `.txt` files, logs, and state
-- do not start automatic loops or hourly scans
+完整流程见：[references/workflow.md](references/workflow.md#step-2-choose-date-and-run-mode)
 
-Command details: [references/usage.md](references/usage.md#capture-commands)
+## 第 3 步：抓取
 
-## Step 4: Same-day reruns
+每次手动启动只执行一轮抓取。
 
-Same-day reruns are incremental only.
+- 在接触雪球页面前先加载 `web-access`
+- 使用 `web-access` 处理主页访问、页面交互、登录态处理和帖子内容提取
+- 使用 `scripts/task_store.py` 处理状态、去重和日志
+- 只处理目标日期的帖子
+- 保存原始 `.txt` 文件和日志
+- 不要启动自动循环或按小时扫描
 
-- read the existing state
-- keep processed items as the deduplication source of truth
-- save only newly discovered posts
-- do not overwrite existing raw files
+## 第 4 步：同日重跑
 
-Full procedure: [references/workflow.md](references/workflow.md#step-4-same-day-rerun)
+同日重跑只能做增量补抓。
 
-## Step 5: Summary generation
+- 读取现有作者-日期输出目录
+- 优先复用 `state.json`，只有在需要手动重建状态时才回退到已保存的原始 `.txt` 文件
+- 只保存新发现的帖子
+- 不要覆盖已有原始文件
 
-After capture is considered complete for the day:
+完整流程见：[references/workflow.md](references/workflow.md#step-4-same-day-rerun)
 
-- run `scripts/daily_summary.py`
-- preserve intermediate analysis files
-- write final Markdown results separately from intermediate files
+## 第 5 步：生成汇总
 
-Summary format: [references/summary-format.md](references/summary-format.md)
+当某个作者当天的抓取已经足够完整后：
 
-## Step 6: Finalize
+- 从已保存的原始 `.txt` 文件准备作者输入
+- 构建 `references/workflow.md` 中定义的作者汇总提示词
+- 将最终 Markdown 与中间文件分开保存
 
-Report:
+汇总格式见：[references/summary-format.md](references/summary-format.md)
 
-- target date
-- number of processed authors
-- output root
-- summary directory
-- processing directory
-- any failures that still require human follow-up
+每份最终作者汇总都必须保留 `总观点` 和 `分观点` 这两个必需章节。
 
-## Output Directory
+## 第 6 步：收尾
 
-All outputs are organized under the selected output root. Repo-local examples in this skill use `{baseDir}/scripts/output`.
+需要汇报：
+
+- 目标日期
+- 已处理作者数量
+- 输出根目录
+- 每位作者的汇总文件位置
+- 每位作者的 processing 目录
+- 仍需人工跟进的失败项
+
+## 输出目录
+
+所有输出都组织在固定输出根目录 `/Users/cjw/dev/projects/skills_output` 下。
 
 ```text
 {output-root}/
-├── {author}_{yyyymmdd}.log
-├── {author}_{yyyymmdd}.state.json
-├── {author}_{yyyymmdd}/
-├── processing/{yyyymmdd}/
-└── summaries/{yyyymmdd}/
+└── {yyyymmdd}/
+    ├── {author}/
+    │   ├── *.txt
+    │   ├── state.json
+    │   ├── task.log
+    │   ├── processing/
+    │   └── summary.md
 ```
 
-Detailed rules: [references/output-layout.md](references/output-layout.md)
+详细规则见：[references/output-layout.md](references/output-layout.md)
 
-## Do Not
+如存在中间分析产物，必须放在 `{yyyymmdd}/{author}/processing/` 下。
 
-- Do not auto-start capture
-- Do not assume scheduling exists
-- Do not treat same-day reruns as fresh tasks
-- Do not mix intermediate files into `summaries/{yyyymmdd}/`
-- Do not claim `spec` matching exists beyond the current summary heuristics
-- Do not silently continue through login, page, save, or risk-control failures
+## 不要这样做
 
-## References
+- 不要自动启动抓取
+- 不要假设存在调度系统
+- 不要把同日重跑当作全新任务
+- 不要把中间文件混放在 `{yyyymmdd}/{author}/summary.md` 旁边
+- 不要声称存在超出当前汇总启发式范围的 `spec` 匹配能力
+- 不要在登录、页面、保存或风控失败后静默继续
+
+## 参考资料
 
 | File | Purpose |
 |------|---------|
-| [EXTEND.md](EXTEND.md) | Manual account configuration and start-of-task confirmation source |
-| [references/workflow.md](references/workflow.md) | Detailed operating procedure |
-| [references/usage.md](references/usage.md) | Script entrypoints and exact CLI usage |
-| [references/output-layout.md](references/output-layout.md) | Output root and directory-layer rules |
-| [references/summary-format.md](references/summary-format.md) | Required Markdown summary structure |
-| [references/error-policy.md](references/error-policy.md) | Failure handling and stop conditions |
-| [references/file-layout.md](references/file-layout.md) | Raw file naming and per-file content format |
-| [scripts/content_task.py](scripts/content_task.py) | Single-account capture |
-| [scripts/task_store.py](scripts/task_store.py) | State and deduplication utility |
-| [scripts/daily_summary.py](scripts/daily_summary.py) | End-of-day summary generator |
+| [EXTEND.md](EXTEND.md) | 手动账号配置与任务启动确认来源 |
+| [references/workflow.md](references/workflow.md) | 详细操作流程 |
+| [references/output-layout.md](references/output-layout.md) | 输出根目录和目录层级规则 |
+| [references/summary-format.md](references/summary-format.md) | 必需的 Markdown 汇总结构 |
+| [references/error-policy.md](references/error-policy.md) | 失败处理与停止条件 |
+| [references/file-layout.md](references/file-layout.md) | 原始文件命名和单文件内容格式 |
+| [scripts/start_automation_chrome.sh](scripts/start_automation_chrome.sh) | 启动固定自动化 Chrome/CDP 实例 |
+| [scripts/task_store.py](scripts/task_store.py) | 状态与去重工具 |

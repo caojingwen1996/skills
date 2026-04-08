@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from utils import resolve_output_root
+
 
 def parse_datetime(value: str) -> datetime:
     text = value.strip()
@@ -126,18 +128,16 @@ def build_summary(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def init_command(args: argparse.Namespace) -> int:
-    output_root = Path(args.output_root).expanduser().resolve()
-    output_root.mkdir(parents=True, exist_ok=True)
+    output_root = resolve_output_root(args.output_root)
 
     start_time = parse_datetime(args.start_time)
     task_date = start_time.strftime("%Y%m%d")
     account = args.account.strip()
     account_slug = sanitize_name(account)
-    base_name = f"{account_slug}_{task_date}"
-
-    log_file = output_root / f"{base_name}.log"
-    result_dir = output_root / base_name
-    state_file = output_root / f"{base_name}.state.json"
+    date_root = output_root / task_date
+    result_dir = date_root / account_slug
+    log_file = result_dir / "task.log"
+    state_file = result_dir / "state.json"
 
     if state_file.exists():
         if not args.resume_existing:
@@ -373,7 +373,7 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser = subparsers.add_parser("init")
     init_parser.add_argument("--account", required=True)
     init_parser.add_argument("--start-time", required=True)
-    init_parser.add_argument("--output-root", default=".")
+    init_parser.add_argument("--output-root", help="输出根目录；未传时从 EXTEND.md 读取")
     init_parser.add_argument("--chrome-profile", default="./.xueqiu-chrome-profile")
     init_parser.add_argument("--resume-existing", action="store_true")
     init_parser.set_defaults(func=init_command)

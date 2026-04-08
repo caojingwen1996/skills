@@ -1,0 +1,10 @@
+{
+  "name": "cjw-xueqiu-daily-monitor",
+  "description": "雪球日常监控 skill，用于抓取雪球帖子并生成汇总",
+  "version": "1.0.0",
+  "author": {
+    "name": "cjw",
+    "email": ""
+  },
+  "keywords": ["xueqiu", "monitor", "crawl"]
+}

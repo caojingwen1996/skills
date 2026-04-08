@@ -1,16 +1,17 @@
 # File Layout
 
-This file describes naming and per-file structure inside the selected output root.
+This file describes naming and per-file structure inside the fixed output root `/Users/cjw/dev/projects/skills_output`.
 
 ## Daily raw artifacts
 
 For a task started on `2026-03-25` for account `某博主`, the workflow writes:
 
-- log file: `某博主_20260325.log`
-- result directory: `某博主_20260325/`
-- state file: `某博主_20260325.state.json`
+- date root: `20260325/`
+- author directory: `20260325/某博主/`
+- log file: `20260325/某博主/task.log`
+- state file: `20260325/某博主/state.json`
 
-All three live directly under the selected output root.
+The raw `.txt` files also live directly under `20260325/某博主/`.
 
 ## Raw result file format
 
@@ -18,16 +19,14 @@ Each saved raw result file is a UTF-8 `.txt` file with at least:
 
 ```text
 标题：...
-内容ID：...
 发布时间：...
-发布日期：...
 原始链接：...
-作者名称：...
-抓取时间：...
 
 正文：
 ...
 ```
+
+Additional metadata may be included, but downstream summary generation must only rely on fields that are actually present in the saved file.
 
 ## State file highlights
 
@@ -46,4 +45,4 @@ The JSON state file tracks:
 - `state_file`
 - `processed_items`
 
-`processed_items` is the deduplication source of truth for the current day.
+`processed_items` is the primary deduplication source of truth for the current day when the state file is present.

@@ -1,50 +1,46 @@
 # Output Layout
 
-All outputs are organized under a selected output root.
+All outputs are organized under the fixed output root `/Users/cjw/dev/projects/skills_output`.
 
-Repo-local examples in this skill use `./scripts/output`, but the same structure applies to any chosen output root.
+The same directory structure applies under that root.
 
 ## Directory layers
 
 ```text
 {output-root}/
-├── {author}_{yyyymmdd}.log
-├── {author}_{yyyymmdd}.state.json
-├── {author}_{yyyymmdd}/
-├── processing/{yyyymmdd}/
-└── summaries/{yyyymmdd}/
+└── {yyyymmdd}/
+    ├── {author}/
+    │   ├── *.txt
+    │   ├── state.json
+    │   ├── task.log
+    │   ├── processing/
+    │   └── summary.md
 ```
 
-## Root layer: raw capture
+## Author layer: raw capture and per-author outputs
 
-The root layer stores per-account raw artifacts for one date:
+Each author directory stores one account's artifacts for one date:
 
-- `{author}_{yyyymmdd}.log`
-- `{author}_{yyyymmdd}.state.json`
-- `{author}_{yyyymmdd}/` raw `.txt` files
+- `*.txt` raw files
+- `state.json`
+- `task.log`
+- `processing/`
+- `summary.md`
 
 Rules:
 
-- keep one log and one state file per account-date
-- keep raw `.txt` files inside the account-date directory
-- do not mix summaries or intermediate analysis files into this layer
+- keep one state file and one log per account-date
+- keep raw `.txt` files at the author directory root
+- keep per-author intermediate analysis under `{yyyymmdd}/{author}/processing/`
+- keep the per-author final Markdown at `{yyyymmdd}/{author}/summary.md`
 
-## Processing layer: intermediate analysis
+## Per-author processing layer: intermediate analysis
 
 Intermediate files must live under:
 
 ```text
-{output-root}/processing/{yyyymmdd}/
+{output-root}/{yyyymmdd}/{author}/processing/
 ```
-
-Current subdirectories created by `scripts/daily_summary.py`:
-
-- `raw_index/`
-- `normalized/`
-- `extracted/`
-- `post_analysis/`
-- `author_daily/`
-- `market_daily/`
 
 Rules:
 
@@ -52,23 +48,22 @@ Rules:
 - preserve these files for traceability and review
 - do not write final Markdown results here
 
-## Summaries layer: final Markdown
+## Final Markdown outputs
 
-Final Markdown results must live under:
+Final Markdown results must live at:
 
 ```text
-{output-root}/summaries/{yyyymmdd}/
+{output-root}/{yyyymmdd}/{author}/summary.md
 ```
 
 Current final outputs:
 
-- one Markdown daily report per author
-- one `daily_summary.md` combined report
+- one `summary.md` per author
 
 Rules:
 
 - keep final readable Markdown only
-- do not mix intermediate JSON or analysis artifacts into this directory
+- do not write intermediate JSON or analysis artifacts beside these Markdown files
 
 ## Completion check
 
