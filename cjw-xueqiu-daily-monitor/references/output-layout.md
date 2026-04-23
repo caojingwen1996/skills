@@ -1,6 +1,6 @@
 # Output Layout
 
-All outputs are organized under the fixed output root `/Users/cjw/dev/projects/skills_output`.
+All outputs are organized under the configured output root declared in `EXTEND.md`.
 
 The same directory structure applies under that root.
 

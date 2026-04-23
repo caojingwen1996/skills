@@ -11,21 +11,14 @@ Maintain accounts in the following format.
 ```md
 ## Accounts
 
-- [enabled] name: 闵行一霸
-  url: https://xueqiu.com/u/9838764557
-  note: 泡泡玛特、美团、港股成长股
 
-- [enabled] name: 买股票的老木匠
+- [enabled] name: 老木匠
   url: https://xueqiu.com/u/3058599833
-  note: 用户追加，待后续补充画像
+  
+  
+  - [enabled] name: 冰冰小美
+  url: https://xueqiu.com/u/7143769715
 
-- [enabled] name: 冰冰小美
-  url: https://xueqiu.com/u/7143769715eqiu.com/u/3058599833
-  note: 待补充
-
-- [disabled] name: 示例博主
-  url: https://xueqiu.com/u/0000000000
-  note: 暂不纳入日常跟踪
 ```
 
 Rules:
@@ -62,7 +55,7 @@ Typical usage:
 
 The current repo-local convention is:
 
-- preferred output root: `/Users/cjw/dev/projects/skills_output`
+- preferred output root: `/Users/cjw/dev/Obsidian/{skill_name}`
 - preferred Chrome profile: `./scripts/.xueqiu-chrome-profile`
 - preferred automation Chrome startup script: `./scripts/start_automation_chrome.sh`
 - preferred automation Chrome CDP port: `9333`
@@ -71,7 +64,7 @@ These are operator defaults for this repository. Capture and summary commands mu
 
 ## Output Expectations
 
-Within the fixed output root `/Users/cjw/dev/projects/skills_output`:
+Within the configured output root declared by `preferred output root`:
 
 - per-author raw capture files, `state.json`, `task.log`, intermediate analysis, and `summary.md` live under `{yyyymmdd}/{author}/`
 - per-author intermediate artifacts live under `{yyyymmdd}/{author}/processing/`

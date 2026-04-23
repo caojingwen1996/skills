@@ -31,20 +31,80 @@ If the user selects option `3`, resolve `today` to the current absolute date bef
 
 Do not continue until the user confirms one of the allowed pre-check outcomes.
 
-### 1.2 Validate task readiness
+`EXTEND.md` is also the single source of truth for output-root configuration. This workflow must not redefine a conflicting output root.
 
-Confirm:
+### 1.2 验证任务就绪状态
 
-- there is at least one enabled account
-- every enabled account has a valid homepage URL
-- the target date is explicit, or option `3` has already been resolved to an absolute date
-- the Chrome profile is available, or the operator is ready for manual login
+确认以下条件全部成立：
 
-If configuration is incomplete:
+- 至少存在一个 `enabled` 账号
+- 每个启用账号都配置了有效的雪球主页 URL
+- 目标日期已经明确，或者选项 `3` 已经被解析为绝对日期
+- 本 skill 的浏览器访问前置条件已经满足：本地 Chrome 可用，固定自动化 Chrome 实例能够通过 CDP 连接，如有需要操作者可以手动完成雪球登录
+- 如出现登录失效或访问验证，操作者必须在自动化 Chrome 窗口内完成处理，并等待当前轮次继续
 
-- stop the run
-- ask the operator to fix `EXTEND.md` or the local runtime setup
+如果配置或运行环境不完整：
 
+- 停止本次任务
+- 要求操作者先修复 `EXTEND.md` 或本地运行环境，再继续
+
+### 1.3 验证本地 CDP 就绪状态 ⛔ BLOCKING
+
+在访问任何雪球页面之前，必须确认浏览器调试链路已经真正可用，而不只是完成了表面配置。
+
+必做检查：
+
+- 检查固定自动化 Chrome/CDP 实例是否已经可访问
+- 如果 Chrome 页面仍显示 remote debugging 为 `starting...`，视为尚未就绪
+- 在继续抓取前，必须确认至少有一个调试端口正在实际监听
+- 不能仅凭一个陈旧的 `DevToolsActivePort` 文件就判断环境可用
+
+出现以下任一情况时，必须停止并要求操作人先修复 Chrome 运行状态，再继续任务：
+
+- 浏览器界面仍显示 remote debugging 为 `starting...`
+- 没有任何可访问的活动调试端口
+- 只存在旧的 `DevToolsActivePort` 文件，但其中记录的端口并未实际监听
+- 自动启动 Chrome 只解决“浏览器未启动”问题，不代表本地提取脚本一定已经可以成功连接 CDP
+- 端口 `3456` 已被占用，不代表当前 Proxy 一定可用
+
+当 `scripts/extract_xueqiu_posts.mjs` 返回以下错误时，应按不同情况处理：
+
+- `Unable to find Chrome or Chromium executable.`
+- `Chrome debug port not ready`
+- `CDP connection failed.`
+- 其他等价的浏览器未连接错误
+
+处理规则如下：
+
+1. 先不要立即判定抓取失败
+2. 先检查固定自动化 Chrome/CDP 实例是否已经启动
+3. 如果未启动，则执行 `scripts/start_automation_chrome.sh` 自动启动浏览器
+4. 启动后，确认该自动化 Chrome 实例内已完成 `chrome://inspect/#remote-debugging` 授权
+5. 检查目标调试端口是否已经暴露 `/json/version`
+6. 如端口可用，则直接复用并重试一次本地提取脚本
+
+如果浏览器已经启动，但本地提取脚本仍然预检失败，则应判定为：
+
+- Chrome 已启动，但 CDP 调试连接仍不可用
+- 当前问题不属于“未打开浏览器”，而属于浏览器调试连接异常
+
+此时必须停止当前任务，并将该项记录为待人工跟进，不要继续后续抓取。
+
+### 1.4 登录失效或访问验证时的等待恢复 ⛔ BLOCKING
+
+当自动化 Chrome 已经可用，但雪球页面要求重新登录或出现访问验证时：
+
+1. 不要关闭自动化 Chrome 窗口
+2. 不要切换到其他浏览器完成登录或验证
+3. 必须在当前自动化 Chrome 窗口内完成登录或验证
+4. 让当前抓取轮次保持等待，页面恢复后继续当前账号，不要求手动重跑本轮
+
+处理规则：
+
+- 登录页：提示操作者在自动化 Chrome 窗口内完成雪球登录，然后等待页面恢复
+- 验证页：提示操作者在自动化 Chrome 窗口内完成访问验证，然后等待页面恢复
+- 页面恢复后：继续当前账号抓取，从阻塞位置往后执行
+- 若等待超时或恢复后页面仍异常：停止当前账号，并记录为待人工跟进
 
 
 ## Step 2: Choose date and run mode
@@ -62,8 +122,9 @@ Use the existing author-date output directory as the source of truth. Prefer `st
 
 Related files:
 
-- browser access: `web-access`
+- browser access: `scripts/extract_xueqiu_posts.mjs`
 - state and logs: `scripts/task_store.py`
+- output root: `EXTEND.md`
 
 ## Step 3: Capture one pass
 
@@ -71,31 +132,56 @@ Each manual start performs one pass only.
 
 For each enabled account:
 
-1. load `web-access`
+1. ensure `scripts/start_automation_chrome.sh` has prepared the dedicated browser instance
 2. reuse the `自动化专用 Chrome 实例` prepared in Step 1.3
 
 In other words, Step 3 must `复用第 1.3 步` already prepared browser instance instead of recreating the browser startup path.
-3. open the homepage through the browser-access method defined by `web-access`
+2. run `scripts/extract_xueqiu_posts.mjs` against the account homepage
+3. open the homepage through the repo-local browser-access method defined by `extract_xueqiu_posts.mjs`
 4. scan currently visible posts
 5. keep only posts that belong to the target date
 6. compare with already saved state or raw files for the same author-date directory
 7. open only newly discovered items
-8. extract content and save raw `.txt` files
+8. extract content into structured JSON and pass it to `scripts/content_task.py`
+9. save raw `.txt` files
 9. append task logs and leave saved raw files available for later reruns
 
 Required behavior:
 
-- do not bypass `web-access` with ad hoc browser instructions in this skill
+- do not bypass `scripts/extract_xueqiu_posts.mjs` with ad hoc browser instructions in this skill
 - do not capture non-target-date items
 - do not overwrite existing raw files
 - do not enter automatic loops
 - do not invent scheduling behavior
+- when login or verification interrupts extraction, keep the automation Chrome window open and wait for manual recovery before resuming the current pass
 
 Local responsibility split for this step:
 
-- `web-access`: homepage access, page interaction, login-state reuse, DOM extraction
+- `scripts/start_automation_chrome.sh`: launch or reuse the dedicated automation Chrome instance
+- `scripts/extract_xueqiu_posts.mjs`: homepage access, page interaction, login-state reuse, login/verification wait-and-resume, DOM extraction
 - `scripts/task_store.py`: state file, deduplication, scan rounds, logs
 - `scripts/content_task.py`: consume extracted post JSON, filter by target date, deduplicate, and save raw `.txt` files
+
+### Extract structured posts
+
+```bash
+node scripts/extract_xueqiu_posts.mjs \
+  --account-url https://xueqiu.com/u/9838764557 \
+  --date 2026-03-25 \
+  --author-name "闵行一霸" \
+  --output-file ./tmp/posts.json
+```
+
+### Persist extracted posts
+
+```bash
+python3 scripts/content_task.py \
+  --input-file ./tmp/posts.json \
+  --author-name "闵行一霸" \
+  --account-url https://xueqiu.com/u/9838764557 \
+  --date 2026-03-25 \
+  --output-dir {output-root}
+```
 
 Common repo-local commands:
 
@@ -105,7 +191,7 @@ Common repo-local commands:
 python3 scripts/task_store.py init \
   --account "闵行一霸" \
   --start-time "2026-03-25 09:30:00" \
-  --output-root /Users/cjw/dev/projects/skills_output \
+  --output-root {output-root} \
   --chrome-profile ./scripts/.xueqiu-chrome-profile
 ```
 
@@ -113,7 +199,7 @@ python3 scripts/task_store.py init \
 
 ```bash
 python3 scripts/task_store.py begin-scan \
-  --state-file /Users/cjw/dev/projects/skills_output/20260325/闵行一霸/state.json \
+  --state-file {output-root}/20260325/闵行一霸/state.json \
   --note "开始扫描"
 ```
 
@@ -121,7 +207,7 @@ python3 scripts/task_store.py begin-scan \
 
 ```bash
 python3 scripts/task_store.py should-process \
-  --state-file /Users/cjw/dev/projects/skills_output/20260325/闵行一霸/state.json \
+  --state-file {output-root}/20260325/闵行一霸/state.json \
   --title "示例标题" \
   --published-at "2026-03-25 15:08:00" \
   --url https://xueqiu.com/u/9838764557/381078922
@@ -131,7 +217,7 @@ python3 scripts/task_store.py should-process \
 
 ```bash
 python3 scripts/task_store.py save-item \
-  --state-file /Users/cjw/dev/projects/skills_output/20260325/闵行一霸/state.json \
+  --state-file {output-root}/20260325/闵行一霸/state.json \
   --title "示例标题" \
   --published-at "2026-03-25 15:08:00" \
   --url https://xueqiu.com/u/9838764557/381078922 \
@@ -142,7 +228,7 @@ python3 scripts/task_store.py save-item \
 
 ```bash
 python3 scripts/task_store.py record-failure \
-  --state-file /Users/cjw/dev/projects/skills_output/20260325/闵行一霸/state.json \
+  --state-file {output-root}/20260325/闵行一霸/state.json \
   --kind save_failed \
   --message "Failed to persist extracted post"
 ```
@@ -151,7 +237,7 @@ python3 scripts/task_store.py record-failure \
 
 ```bash
 python3 scripts/task_store.py finish \
-  --state-file /Users/cjw/dev/projects/skills_output/20260325/闵行一霸/state.json
+  --state-file {output-root}/20260325/闵行一霸/state.json
 ```
 
 ## Step 4: Same-day rerun
@@ -310,11 +396,11 @@ The workflow is considered complete for the date when:
 
 Stop and tell the user before continuing when any of the following happens:
 
-- login expired
+- login expired and does not recover within the wait window
 - page abnormal
 - page structure changed
 - extracted content is empty
 - save failed
-- risk-control prompt appeared
+- risk-control prompt appeared and does not recover within the wait window
 
 Detailed failure handling: [error-policy.md](error-policy.md)

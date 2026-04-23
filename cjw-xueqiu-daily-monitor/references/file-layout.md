@@ -1,6 +1,6 @@
 # File Layout
 
-This file describes naming and per-file structure inside the fixed output root `/Users/cjw/dev/projects/skills_output`.
+This file describes naming and per-file structure inside the configured output root declared in `EXTEND.md`.
 
 ## Daily raw artifacts
 

@@ -10,6 +10,17 @@ START_URL="${XUEQIU_CHROME_START_URL:-https://xueqiu.com/}"
 LOG_FILE="${XUEQIU_CHROME_LOG_FILE:-$SCRIPT_DIR/.xueqiu-automation-chrome.log}"
 VERSION_URL="http://${DEBUG_HOST}:${DEBUG_PORT}/json/version"
 
+app_bundle_for_binary() {
+  local chrome_bin="$1"
+  case "$chrome_bin" in
+    *.app/Contents/MacOS/*)
+      printf '%s\n' "${chrome_bin%/Contents/MacOS/*}"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 find_chrome_path() {
   if [[ -n "${CHROME_PATH:-}" ]]; then
     printf '%s\n' "$CHROME_PATH"
@@ -63,8 +74,7 @@ CHROME_BIN="$(find_chrome_path)" || {
 
 mkdir -p "$PROFILE_DIR"
 
-CMD=(
-  "$CHROME_BIN"
+CHROME_ARGS=(
   "--user-data-dir=$PROFILE_DIR"
   "--remote-debugging-port=$DEBUG_PORT"
   "--no-first-run"
@@ -72,6 +82,26 @@ CMD=(
   "--disable-popup-blocking"
   "$START_URL"
 )
+
+CMD=()
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  if APP_BUNDLE="$(app_bundle_for_binary "$CHROME_BIN")"; then
+    CMD=(
+      open
+      -na
+      "$APP_BUNDLE"
+      --args
+      "${CHROME_ARGS[@]}"
+    )
+  fi
+fi
+
+if [[ ${#CMD[@]} -eq 0 ]]; then
+  CMD=(
+    "$CHROME_BIN"
+    "${CHROME_ARGS[@]}"
+  )
+fi
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
   printf 'DRY RUN:'

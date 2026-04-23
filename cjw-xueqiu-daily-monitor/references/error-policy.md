@@ -28,8 +28,12 @@ These situations require explicit operator visibility and must not be silently i
 
 4. Allow human recovery
 
-- once login or page issues are resolved, the operator can rerun the same day
+- when login or page issues appear, keep the current automation Chrome window open and let the operator recover in that same window first
+- once login or page issues are resolved inside the automation Chrome window, the current extraction pass should continue automatically when possible
+- only if the wait window times out or recovery still fails should the operator fall back to a same-day rerun
 - reruns must continue from the existing state instead of starting over
+- when a Xueqiu verification page appears, explicitly tell the operator to complete the verification in the automation Chrome window and wait for extraction to resume
+- when a Xueqiu login page appears, explicitly tell the operator to log in in the automation Chrome window and wait for extraction to resume
 
 ## Stop-and-ask cases
 

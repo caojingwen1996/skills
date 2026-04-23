@@ -19,6 +19,8 @@ class StartAutomationChromeScriptTests(unittest.TestCase):
         self.assertIn('DEFAULT_DEBUG_PORT="9333"', text)
         self.assertIn("/json/version", text)
         self.assertIn("already running", text)
+        self.assertIn("open", text)
+        self.assertIn("-na", text)
 
     def test_script_supports_dry_run_for_fixed_launch_command(self) -> None:
         script_path = PROJECT_ROOT / "scripts" / "start_automation_chrome.sh"
@@ -43,6 +45,27 @@ class StartAutomationChromeScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--remote-debugging-port=9333", result.stdout)
         self.assertIn(".xueqiu-chrome-profile", result.stdout)
+
+    def test_script_uses_open_na_for_macos_app_bundle_dry_run(self) -> None:
+        script_path = PROJECT_ROOT / "scripts" / "start_automation_chrome.sh"
+
+        result = subprocess.run(
+            ["bash", str(script_path)],
+            cwd=PROJECT_ROOT,
+            env={
+                **os.environ,
+                "DRY_RUN": "1",
+                "CHROME_PATH": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            },
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("open -na", result.stdout)
+        self.assertIn("/Applications/Google\\ Chrome.app", result.stdout)
+        self.assertIn("--remote-debugging-port=9333", result.stdout)
 
 
 if __name__ == "__main__":
