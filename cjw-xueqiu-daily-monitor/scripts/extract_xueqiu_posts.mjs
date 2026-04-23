@@ -26,6 +26,7 @@ function printHelp() {
       "  --profile-dir PATH     Chrome profile dir; defaults to scripts/.xueqiu-chrome-profile",
       "  --debug-port PORT      Remote debugging port; defaults to 9333",
       "  --max-posts N          Maximum detail pages to extract; defaults to 30",
+      "  --verification-mode MODE  manual | auto-then-manual | auto-only; defaults to auto-then-manual",
       "  --headless             Launch Chrome in headless mode when starting a new instance",
       "  --help                 Show this help",
       "",
@@ -116,6 +117,7 @@ const VERIFICATION_PAYLOAD_PATTERN =
   /(访问验证|请按住滑块|拖动到最右边|为了更好的访问体验|即可继续访问网页|别离开)/;
 const LOGIN_PAYLOAD_PATTERN =
   /(登录雪球|登录后(?:即可|可)?(?:查看|继续|发帖|评论|互动)|请先登录|立即登录|注册登录|账号密码登录|手机验证码登录)/;
+const VERIFICATION_MODES = new Set(["manual", "auto-then-manual", "auto-only"]);
 
 export function classifyManualActionPayload(payload) {
   const text = [
@@ -177,6 +179,7 @@ function parseArgs(argv) {
     profileDir: "",
     debugPort: Number.parseInt(process.env.XUEQIU_CHROME_DEBUG_PORT ?? "9333", 10),
     maxPosts: 30,
+    verificationMode: "auto-then-manual",
     headless: false,
   };
 
@@ -204,6 +207,9 @@ function parseArgs(argv) {
       case "--max-posts":
         args.maxPosts = Number.parseInt(argv[++index] ?? "", 10);
         break;
+      case "--verification-mode":
+        args.verificationMode = argv[++index] ?? "";
+        break;
       case "--headless":
         args.headless = true;
         break;
@@ -226,8 +232,21 @@ function parseArgs(argv) {
   if (!Number.isInteger(args.maxPosts) || args.maxPosts <= 0) {
     throw new Error("--max-posts must be a positive integer");
   }
+  if (!VERIFICATION_MODES.has(args.verificationMode)) {
+    throw new Error("--verification-mode must be one of: manual, auto-then-manual, auto-only");
+  }
 
   return args;
+}
+
+export function parseArgsForTesting(argv) {
+  return parseArgs(argv);
+}
+
+export function shouldFallbackToManualWait(mode, autoVerificationSucceeded) {
+  if (mode === "manual") return true;
+  if (mode === "auto-then-manual") return !autoVerificationSucceeded;
+  return false;
 }
 
 async function evaluateJson(cdp, sessionId, expression, awaitPromise = true) {
@@ -255,6 +274,87 @@ async function waitForDocumentReady(cdp, sessionId, timeoutMs = 20_000) {
     await sleep(200);
   }
   throw new Error("Timed out waiting for document.readyState");
+}
+
+export function buildHumanLikeDragPath({
+  startX,
+  startY,
+  endX,
+  endY,
+  steps = 18,
+}) {
+  const points = [{ x: startX, y: startY, delayMs: 12 }];
+  const baseSteps = Math.max(steps, 8);
+
+  for (let index = 1; index < baseSteps - 2; index += 1) {
+    const progress = index / (baseSteps - 2);
+    const eased =
+      progress < 0.65
+        ? 0.9 * (1 - Math.pow(1 - progress / 0.65, 2))
+        : 0.9 + ((progress - 0.65) / 0.35) * 0.08;
+    const jitterY = index % 2 === 0 ? 0.8 : -0.8;
+    points.push({
+      x: Math.round((startX + (endX - startX) * eased) * 100) / 100,
+      y: Math.round((startY + (endY - startY) * progress + jitterY) * 100) / 100,
+      delayMs: index > baseSteps - 6 ? 24 : 16,
+    });
+  }
+
+  const overshootX = Math.max(startX, endX + Math.min(4, Math.max(1, Math.abs(endX - startX) * 0.02)));
+  const backtrackX = Math.max(startX, endX - Math.min(3, Math.max(1, Math.abs(endX - startX) * 0.015)));
+  points.push({ x: overshootX, y: endY + 0.4, delayMs: 28 });
+  points.push({ x: backtrackX, y: endY, delayMs: 30 });
+  points.push({ x: endX, y: endY, delayMs: 32 });
+
+  return points;
+}
+
+function buildVerificationWidgetInspectionScript() {
+  return `
+    (() => {
+      const textPattern = /访问验证|请按住滑块|拖动到最右边|为了更好的访问体验|即可继续访问网页|别离开|滑块|验证/;
+      const elements = Array.from(document.querySelectorAll("div, span, button, section"));
+      const hintNode = elements.find((node) => textPattern.test((node.innerText || "").replace(/\\s+/g, "")));
+      if (!hintNode) return null;
+
+      const container = hintNode.closest("section, article, main, div") || hintNode.parentElement || document.body;
+      const nodes = Array.from(container.querySelectorAll("div, span, button"));
+      const boxes = nodes
+        .map((node) => ({ node, rect: node.getBoundingClientRect(), text: (node.innerText || "").trim() }))
+        .filter(({ rect }) => rect.width > 0 && rect.height > 0);
+
+      const handleCandidate = boxes
+        .filter(({ rect, text }) =>
+          rect.width >= 20 &&
+          rect.width <= 120 &&
+          rect.height >= 20 &&
+          rect.height <= 120 &&
+          !textPattern.test(text)
+        )
+        .sort((left, right) => (right.rect.width * right.rect.height) - (left.rect.width * left.rect.height))[0];
+
+      if (!handleCandidate) return null;
+
+      const trackCandidate = boxes
+        .filter(({ rect, node }) =>
+          node !== handleCandidate.node &&
+          rect.width > handleCandidate.rect.width * 2 &&
+          rect.height >= handleCandidate.rect.height * 0.6 &&
+          rect.left <= handleCandidate.rect.left + 8 &&
+          rect.right >= handleCandidate.rect.right - 8
+        )
+        .sort((left, right) => (right.rect.width - left.rect.width))[0];
+
+      if (!trackCandidate) return null;
+
+      return {
+        handleX: handleCandidate.rect.left + handleCandidate.rect.width / 2,
+        handleY: handleCandidate.rect.top + handleCandidate.rect.height / 2,
+        endX: trackCandidate.rect.right - handleCandidate.rect.width / 2 - 2,
+        endY: handleCandidate.rect.top + handleCandidate.rect.height / 2,
+      };
+    })()
+  `;
 }
 
 function buildHomepageExtractionScript(maxPosts) {
@@ -386,6 +486,135 @@ async function inspectCurrentPage(cdp, sessionId) {
   };
 }
 
+async function inspectVerificationWidget(cdp, sessionId) {
+  const widget = await evaluateJson(cdp, sessionId, buildVerificationWidgetInspectionScript(), false);
+  if (!widget) return null;
+
+  return {
+    handleX: Number(widget.handleX),
+    handleY: Number(widget.handleY),
+    endX: Number(widget.endX),
+    endY: Number(widget.endY),
+  };
+}
+
+async function dispatchMouseDragPath(cdp, sessionId, dragPath) {
+  const [firstPoint, ...restPoints] = dragPath;
+  if (!firstPoint) {
+    throw new Error("Drag path must contain at least one point.");
+  }
+
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseMoved",
+      x: firstPoint.x,
+      y: firstPoint.y,
+      button: "left",
+    },
+    { sessionId }
+  );
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mousePressed",
+      x: firstPoint.x,
+      y: firstPoint.y,
+      button: "left",
+      clickCount: 1,
+    },
+    { sessionId }
+  );
+
+  for (const point of restPoints) {
+    await sleep(point.delayMs ?? 16);
+    await cdp.send(
+      "Input.dispatchMouseEvent",
+      {
+        type: "mouseMoved",
+        x: point.x,
+        y: point.y,
+        button: "left",
+      },
+      { sessionId }
+    );
+  }
+
+  const lastPoint = dragPath[dragPath.length - 1];
+  await cdp.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseReleased",
+      x: lastPoint.x,
+      y: lastPoint.y,
+      button: "left",
+      clickCount: 1,
+    },
+    { sessionId }
+  );
+}
+
+async function attemptAutoVerification(cdp, sessionId, maxAttempts = 2) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    process.stderr.write(`[extract_xueqiu_posts] attempting automatic slider verification (${attempt}/${maxAttempts})\n`);
+
+    let widget = null;
+    try {
+      await waitForDocumentReady(cdp, sessionId, 5_000);
+      widget = await inspectVerificationWidget(cdp, sessionId);
+    } catch {
+      widget = null;
+    }
+
+    if (!widget) {
+      process.stderr.write("[extract_xueqiu_posts] automatic slider verification could not locate a stable widget\n");
+      continue;
+    }
+
+    const dragPath = buildHumanLikeDragPath({
+      startX: widget.handleX,
+      startY: widget.handleY,
+      endX: widget.endX,
+      endY: widget.endY,
+    });
+
+    try {
+      await dispatchMouseDragPath(cdp, sessionId, dragPath);
+      await sleep(1_500);
+      await waitForDocumentReady(cdp, sessionId, 5_000);
+      const payload = await inspectCurrentPage(cdp, sessionId);
+      if (!classifyManualActionPayload(payload)) {
+        process.stderr.write("[extract_xueqiu_posts] automatic slider verification succeeded\n");
+        return true;
+      }
+    } catch (error) {
+      process.stderr.write(
+        `[extract_xueqiu_posts] automatic slider verification attempt failed: ${
+          error instanceof Error ? error.message : String(error)
+        }\n`
+      );
+    }
+  }
+
+  process.stderr.write("[extract_xueqiu_posts] automatic slider verification did not clear the page\n");
+  return false;
+}
+
+async function resolveManualAction(cdp, sessionId, reason, verificationMode) {
+  if (reason === "verification" && verificationMode !== "manual") {
+    const autoVerificationSucceeded = await attemptAutoVerification(cdp, sessionId);
+    if (autoVerificationSucceeded) {
+      return;
+    }
+    if (!shouldFallbackToManualWait(verificationMode, autoVerificationSucceeded)) {
+      throw new Error("Automatic Xueqiu verification failed without manual fallback.");
+    }
+    process.stderr.write("[extract_xueqiu_posts] automatic verification failed, falling back to manual recovery\n");
+  }
+
+  await waitForManualActionCompletion(cdp, sessionId, reason);
+}
+
 async function waitForManualActionCompletion(cdp, sessionId, reason, timeoutMs = 300_000, pollMs = 3_000) {
   process.stderr.write(`[extract_xueqiu_posts] ${formatManualActionGuidance(reason)}\n`);
 
@@ -473,7 +702,7 @@ async function main() {
     const homepageManualAction = classifyManualActionPayload(homepagePayload);
     if (homepageManualAction) {
       manualActionBlocked = true;
-      await waitForManualActionCompletion(cdp, homepage.sessionId, homepageManualAction);
+      await resolveManualAction(cdp, homepage.sessionId, homepageManualAction, args.verificationMode);
       await cdp.send("Page.navigate", { url: args.accountUrl }, { sessionId: homepage.sessionId });
       await waitForDocumentReady(cdp, homepage.sessionId);
       await sleep(2_000);
@@ -514,7 +743,7 @@ async function main() {
           process.stderr.write(
             `[extract_xueqiu_posts] ${manualActionReason} page detected for ${candidate.url}\n`
           );
-          await waitForManualActionCompletion(cdp, detailSession.sessionId, manualActionReason);
+          await resolveManualAction(cdp, detailSession.sessionId, manualActionReason, args.verificationMode);
           await cdp.send("Page.navigate", { url: candidate.url }, { sessionId: detailSession.sessionId });
           await waitForDocumentReady(cdp, detailSession.sessionId);
           await sleep(1_000);

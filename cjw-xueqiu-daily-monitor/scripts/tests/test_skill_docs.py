@@ -87,6 +87,19 @@ class SkillDocumentationTests(unittest.TestCase):
             self.assertIn("EXTEND.md", text)
             self.assertNotIn("/Users/cjw/dev/projects/skills_output", text)
 
+    def test_docs_describe_auto_verification_with_manual_fallback(self) -> None:
+        skill_text = read_text("SKILL.md")
+        workflow_text = read_text("references", "workflow.md")
+        error_policy_text = read_text("references", "error-policy.md")
+
+        for text in (skill_text, workflow_text, error_policy_text):
+            self.assertIn("自动", text)
+            self.assertIn("人工", text)
+
+        self.assertIn("登录", workflow_text)
+        self.assertIn("验证", workflow_text)
+        self.assertIn("回退", error_policy_text)
+
 
 if __name__ == "__main__":
     unittest.main()

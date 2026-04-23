@@ -62,11 +62,6 @@ find_chrome_path() {
   return 1
 }
 
-if curl -fsS "$VERSION_URL" >/dev/null 2>&1; then
-  echo "Automation Chrome already running at $VERSION_URL"
-  exit 0
-fi
-
 CHROME_BIN="$(find_chrome_path)" || {
   echo "Unable to find Chrome or Chromium executable." >&2
   exit 1
@@ -107,6 +102,11 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
   printf 'DRY RUN:'
   printf ' %q' "${CMD[@]}"
   printf '\n'
+  exit 0
+fi
+
+if curl -fsS "$VERSION_URL" >/dev/null 2>&1; then
+  echo "Automation Chrome already running at $VERSION_URL"
   exit 0
 fi
 

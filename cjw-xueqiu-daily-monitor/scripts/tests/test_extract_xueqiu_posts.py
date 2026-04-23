@@ -131,6 +131,90 @@ console.log(JSON.stringify({{
         self.assertTrue(payload["normal"]["closeHomepageTarget"])
         self.assertTrue(payload["normal"]["terminateLaunchedChrome"])
 
+    def test_verification_mode_defaults_to_auto_then_manual(self) -> None:
+        script_path = (PROJECT_ROOT / "scripts" / "extract_xueqiu_posts.mjs").as_uri()
+        payload = self.run_node_module_json(
+            f"""
+import {{ parseArgsForTesting }} from {json.dumps(script_path)};
+console.log(JSON.stringify(parseArgsForTesting([
+  "--account-url", "https://xueqiu.com/u/1",
+  "--date", "2026-04-23"
+])));
+"""
+        )
+
+        self.assertEqual(payload["verificationMode"], "auto-then-manual")
+
+    def test_verification_mode_rejects_invalid_value(self) -> None:
+        script_path = (PROJECT_ROOT / "scripts" / "extract_xueqiu_posts.mjs").as_uri()
+        result = subprocess.run(
+            [
+                "node",
+                "--input-type=module",
+                "-e",
+                f"""
+import {{ parseArgsForTesting }} from {json.dumps(script_path)};
+parseArgsForTesting([
+  "--account-url", "https://xueqiu.com/u/1",
+  "--date", "2026-04-23",
+  "--verification-mode", "bad"
+]);
+""",
+            ],
+            cwd=PROJECT_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("verification-mode", result.stderr)
+
+    def test_should_fallback_to_manual_wait(self) -> None:
+        script_path = (PROJECT_ROOT / "scripts" / "extract_xueqiu_posts.mjs").as_uri()
+        payload = self.run_node_module_json(
+            f"""
+import {{ shouldFallbackToManualWait }} from {json.dumps(script_path)};
+console.log(JSON.stringify({{
+  manual: shouldFallbackToManualWait("manual", false),
+  autoThenManual: shouldFallbackToManualWait("auto-then-manual", false),
+  autoOnly: shouldFallbackToManualWait("auto-only", false)
+}}));
+"""
+        )
+
+        self.assertTrue(payload["manual"])
+        self.assertTrue(payload["autoThenManual"])
+        self.assertFalse(payload["autoOnly"])
+
+    def test_build_human_like_drag_path_properties(self) -> None:
+        script_path = (PROJECT_ROOT / "scripts" / "extract_xueqiu_posts.mjs").as_uri()
+        payload = self.run_node_module_json(
+            f"""
+import {{ buildHumanLikeDragPath }} from {json.dumps(script_path)};
+const path = buildHumanLikeDragPath({{
+  startX: 10,
+  startY: 20,
+  endX: 120,
+  endY: 20,
+  steps: 12
+}});
+console.log(JSON.stringify({{
+  points: path.length,
+  first: path[0],
+  last: path[path.length - 1],
+  hasBacktrack: path.some((point, index) => index > 0 && point.x < path[index - 1].x)
+}}));
+"""
+        )
+
+        self.assertGreaterEqual(payload["points"], 12)
+        self.assertEqual(payload["first"]["x"], 10)
+        self.assertEqual(payload["first"]["y"], 20)
+        self.assertEqual(payload["last"]["x"], 120)
+        self.assertEqual(payload["last"]["y"], 20)
+        self.assertTrue(payload["hasBacktrack"])
+
 
 if __name__ == "__main__":
     unittest.main()

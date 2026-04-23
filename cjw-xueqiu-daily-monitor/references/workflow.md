@@ -41,7 +41,7 @@ Do not continue until the user confirms one of the allowed pre-check outcomes.
 - 每个启用账号都配置了有效的雪球主页 URL
 - 目标日期已经明确，或者选项 `3` 已经被解析为绝对日期
 - 本 skill 的浏览器访问前置条件已经满足：本地 Chrome 可用，固定自动化 Chrome 实例能够通过 CDP 连接，如有需要操作者可以手动完成雪球登录
-- 如出现登录失效或访问验证，操作者必须在自动化 Chrome 窗口内完成处理，并等待当前轮次继续
+- 如出现登录失效或访问验证，脚本应先按配置自动尝试滑块验证；自动失败时由操作者在自动化 Chrome 窗口内继续人工处理，并等待当前轮次继续
 
 如果配置或运行环境不完整：
 
@@ -102,7 +102,7 @@ Do not continue until the user confirms one of the allowed pre-check outcomes.
 处理规则：
 
 - 登录页：提示操作者在自动化 Chrome 窗口内完成雪球登录，然后等待页面恢复
-- 验证页：提示操作者在自动化 Chrome 窗口内完成访问验证，然后等待页面恢复
+- 验证页：脚本应先自动尝试滑块验证；如果自动尝试失败，再提示操作者在自动化 Chrome 窗口内继续人工验证
 - 页面恢复后：继续当前账号抓取，从阻塞位置往后执行
 - 若等待超时或恢复后页面仍异常：停止当前账号，并记录为待人工跟进
 
@@ -153,12 +153,13 @@ Required behavior:
 - do not overwrite existing raw files
 - do not enter automatic loops
 - do not invent scheduling behavior
-- when login or verification interrupts extraction, keep the automation Chrome window open and wait for manual recovery before resuming the current pass
+- when login interrupts extraction, keep the automation Chrome window open and wait for manual recovery before resuming the current pass
+- when verification interrupts extraction, automatically attempt the slider first and only then fall back to manual recovery in the same automation Chrome window
 
 Local responsibility split for this step:
 
 - `scripts/start_automation_chrome.sh`: launch or reuse the dedicated automation Chrome instance
-- `scripts/extract_xueqiu_posts.mjs`: homepage access, page interaction, login-state reuse, login/verification wait-and-resume, DOM extraction
+- `scripts/extract_xueqiu_posts.mjs`: homepage access, page interaction, login-state reuse, verification auto-attempt with manual fallback, DOM extraction
 - `scripts/task_store.py`: state file, deduplication, scan rounds, logs
 - `scripts/content_task.py`: consume extracted post JSON, filter by target date, deduplicate, and save raw `.txt` files
 
