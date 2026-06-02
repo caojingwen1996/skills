@@ -12,8 +12,6 @@ Maintain accounts in the following format.
 ## Accounts
 
 
-- [enabled] name: 老木匠
-  url: https://xueqiu.com/u/3058599833
   
   
   - [enabled] name: 冰冰小美
@@ -27,6 +25,26 @@ Rules:
 - `url` must be the Xueqiu homepage URL
 - only `enabled` accounts are included in the daily workflow
 - `note` is optional and for operator context only
+
+## WeChat Article Links
+
+微信公众号抓取只支持文章链接入口，不支持公众号主页自动发现文章。
+
+When the operator provides WeChat article links, keep them as direct article URLs:
+
+```md
+## WeChat Article Links
+
+- [enabled] name: 样例公众号
+  url: https://mp.weixin.qq.com/s/example
+```
+
+Rules:
+
+- `url` must be a `https://mp.weixin.qq.com/s...` article URL
+- multiple article links may be provided in a plain text file, one URL per line
+- use `scripts/extract_wechat_articles.mjs` before `scripts/content_task.py`
+- extracted JSON must keep the fields used by the raw-file writer: `title`, `published_at`, `url`, `author_name`, and `content`
 
 ## Start Rules
 

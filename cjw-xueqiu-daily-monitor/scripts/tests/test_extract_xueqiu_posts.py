@@ -41,6 +41,7 @@ class ExtractXueqiuPostsScriptTests(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
@@ -144,6 +145,92 @@ console.log(JSON.stringify(parseArgsForTesting([
         )
 
         self.assertEqual(payload["verificationMode"], "auto-then-manual")
+
+    def test_default_profile_dir_uses_valid_file_url_path(self) -> None:
+        script_path = (PROJECT_ROOT / "scripts" / "extract_xueqiu_posts.mjs").as_uri()
+        payload = self.run_node_module_json(
+            f"""
+import {{ resolveProfileDirForTesting }} from {json.dumps(script_path)};
+const profileDir = resolveProfileDirForTesting({json.dumps(script_path)}, "");
+console.log(JSON.stringify({{ profileDir }}));
+"""
+        )
+
+        self.assertIn(".xueqiu-chrome-profile", payload["profileDir"])
+        self.assertNotIn("E:\\\\E:\\\\", payload["profileDir"])
+
+    def test_column_capture_args_accept_all_visible_and_author_comments(self) -> None:
+        script_path = (PROJECT_ROOT / "scripts" / "extract_xueqiu_posts.mjs").as_uri()
+        payload = self.run_node_module_json(
+            f"""
+import {{ parseArgsForTesting, isXueqiuPostUrl }} from {json.dumps(script_path)};
+const parsed = parseArgsForTesting([
+  "--account-url", "https://xueqiu.com/7143769715/column",
+  "--date", "2026-05-25",
+  "--capture-scope", "all-visible",
+  "--comment-scope", "author-only"
+]);
+console.log(JSON.stringify({{
+  accountUrl: parsed.accountUrl,
+  captureScope: parsed.captureScope,
+  commentScope: parsed.commentScope,
+  columnPostUrl: isXueqiuPostUrl("https://xueqiu.com/7143769715/381078922"),
+  userHomeUrl: isXueqiuPostUrl("https://xueqiu.com/u/7143769715")
+}}));
+"""
+        )
+
+        self.assertEqual(payload["accountUrl"], "https://xueqiu.com/7143769715/column")
+        self.assertEqual(payload["captureScope"], "all-visible")
+        self.assertEqual(payload["commentScope"], "author-only")
+        self.assertTrue(payload["columnPostUrl"])
+        self.assertFalse(payload["userHomeUrl"])
+
+    def test_capture_scope_all_visible_keeps_other_dates(self) -> None:
+        script_path = (PROJECT_ROOT / "scripts" / "extract_xueqiu_posts.mjs").as_uri()
+        payload = self.run_node_module_json(
+            f"""
+import {{ shouldKeepCandidateForCaptureScope }} from {json.dumps(script_path)};
+console.log(JSON.stringify({{
+  dailyDropsOtherDate: shouldKeepCandidateForCaptureScope(
+    {{ published_at: "2026-05-24 12:00" }},
+    "2026-05-25",
+    "daily"
+  ),
+  allVisibleKeepsOtherDate: shouldKeepCandidateForCaptureScope(
+    {{ published_at: "2026-05-24 12:00" }},
+    "2026-05-25",
+    "all-visible"
+  )
+}}));
+"""
+        )
+
+        self.assertFalse(payload["dailyDropsOtherDate"])
+        self.assertTrue(payload["allVisibleKeepsOtherDate"])
+
+    def test_author_comment_filter_keeps_only_author_comments(self) -> None:
+        script_path = (PROJECT_ROOT / "scripts" / "extract_xueqiu_posts.mjs").as_uri()
+        payload = self.run_node_module_json(
+            f"""
+import {{ filterCommentsForScope }} from {json.dumps(script_path)};
+const comments = [
+  {{ author_name: "冰冰小美", content: "作者补充", published_at: "2026-05-25 10:00" }},
+  {{ author_name: "其他用户", content: "路人评论", published_at: "2026-05-25 10:01" }},
+  {{ author_name: "冰冰小美", content: "", published_at: "2026-05-25 10:02" }}
+];
+console.log(JSON.stringify({{
+  authorOnly: filterCommentsForScope(comments, "author-only", "冰冰小美"),
+  all: filterCommentsForScope(comments, "all", "冰冰小美"),
+  none: filterCommentsForScope(comments, "none", "冰冰小美")
+}}));
+"""
+        )
+
+        self.assertEqual(len(payload["authorOnly"]), 1)
+        self.assertEqual(payload["authorOnly"][0]["content"], "作者补充")
+        self.assertEqual(len(payload["all"]), 2)
+        self.assertEqual(payload["none"], [])
 
     def test_verification_mode_rejects_invalid_value(self) -> None:
         script_path = (PROJECT_ROOT / "scripts" / "extract_xueqiu_posts.mjs").as_uri()

@@ -80,6 +80,74 @@ class ContentTaskTests(unittest.TestCase):
             self.assertEqual(len(files), 1)
             self.assertTrue((result_dir / files[0]).read_text(encoding="utf-8").startswith("标题：第一条"))
 
+    def test_author_root_date_layout_groups_by_post_date_and_saves_author_comments(self) -> None:
+        from scripts.content_task import process_extracted_posts
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir) / "冰冰小美"
+            input_file = Path(tmpdir) / "posts.json"
+            input_file.write_text(
+                json.dumps(
+                    [
+                        {
+                            "title": "五月二十五文章",
+                            "published_at": "2026-05-25 09:30:00",
+                            "url": "https://xueqiu.com/7143769715/381078922",
+                            "content": "正文一",
+                            "author_name": "冰冰小美",
+                            "author_comments": [
+                                {
+                                    "author_name": "冰冰小美",
+                                    "published_at": "2026-05-25 10:00:00",
+                                    "content": "作者评论一",
+                                }
+                            ],
+                        },
+                        {
+                            "title": "五月二十四文章",
+                            "published_at": "2026-05-24 13:00:00",
+                            "url": "https://xueqiu.com/7143769715/381078900",
+                            "content": "正文二",
+                            "author_name": "冰冰小美",
+                            "author_comments": [],
+                        },
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            args = Namespace(
+                input_file=str(input_file),
+                author_name="冰冰小美",
+                account_url="https://xueqiu.com/7143769715/column",
+                date="2026-05-25",
+                output_dir=str(output_root),
+                date_source="post",
+                date_filter="off",
+                layout="author-root-date",
+            )
+
+            summary = process_extracted_posts(args)
+
+            first_day = output_root / "20260525"
+            second_day = output_root / "20260524"
+            first_files = sorted(first_day.glob("*.txt"))
+            second_files = sorted(second_day.glob("*.txt"))
+
+            self.assertEqual(summary.candidate_count, 2)
+            self.assertEqual(summary.matched_count, 2)
+            self.assertEqual(summary.success_count, 2)
+            self.assertEqual(summary.failure_count, 0)
+            self.assertEqual(len(first_files), 1)
+            self.assertEqual(len(second_files), 1)
+            self.assertTrue((first_day / "state.json").exists())
+            self.assertTrue((second_day / "state.json").exists())
+            self.assertTrue((first_day / "processing").exists())
+            saved_text = first_files[0].read_text(encoding="utf-8")
+            self.assertIn("作者评论：", saved_text)
+            self.assertIn("作者评论一", saved_text)
+
 
 if __name__ == "__main__":
     unittest.main()

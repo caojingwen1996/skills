@@ -40,10 +40,24 @@ class SkillDocumentationTests(unittest.TestCase):
 
     def test_repo_local_browser_access_files_exist(self) -> None:
         extract_script = PROJECT_ROOT / "scripts" / "extract_xueqiu_posts.mjs"
+        wechat_script = PROJECT_ROOT / "scripts" / "extract_wechat_articles.mjs"
         vendor_entry = PROJECT_ROOT / "scripts" / "vendor" / "baoyu-chrome-cdp" / "src" / "index.mjs"
 
         self.assertTrue(extract_script.exists(), extract_script)
+        self.assertTrue(wechat_script.exists(), wechat_script)
         self.assertTrue(vendor_entry.exists(), vendor_entry)
+
+    def test_docs_describe_wechat_article_link_capture_scope(self) -> None:
+        skill_text = read_text("SKILL.md")
+        extend_text = read_text("EXTEND.md")
+        workflow_text = read_text("references", "workflow.md")
+
+        for text in (skill_text, extend_text, workflow_text):
+            self.assertIn("微信公众号", text)
+            self.assertIn("extract_wechat_articles.mjs", text)
+            self.assertIn("文章链接", text)
+
+        self.assertIn("不支持公众号主页自动发现", workflow_text)
 
     def test_workflow_contains_local_command_reference_without_usage_doc(self) -> None:
         skill_text = read_text("SKILL.md")

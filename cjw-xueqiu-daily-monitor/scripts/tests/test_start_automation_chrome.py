@@ -10,6 +10,25 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def bash_path(path: Path) -> str:
+    text = str(path)
+    drive = path.drive.rstrip(":").lower()
+    if drive and os.name == "nt":
+        tail = text[len(path.drive) :].replace("\\", "/").lstrip("/")
+        return f"/mnt/{drive}/{tail}"
+    return text
+
+
+def bash_is_available() -> bool:
+    result = subprocess.run(
+        ["bash", "-lc", "exit 0"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
 class StartAutomationChromeScriptTests(unittest.TestCase):
     def test_script_exists_and_uses_fixed_profile_and_port(self) -> None:
         script_path = PROJECT_ROOT / "scripts" / "start_automation_chrome.sh"
@@ -23,6 +42,8 @@ class StartAutomationChromeScriptTests(unittest.TestCase):
         self.assertIn("-na", text)
 
     def test_script_supports_dry_run_for_fixed_launch_command(self) -> None:
+        if not bash_is_available():
+            self.skipTest("bash is installed but no runnable shell environment is available")
         script_path = PROJECT_ROOT / "scripts" / "start_automation_chrome.sh"
         with tempfile.TemporaryDirectory() as tmpdir:
             chrome_path = Path(tmpdir) / "chrome"
@@ -30,7 +51,7 @@ class StartAutomationChromeScriptTests(unittest.TestCase):
             chrome_path.chmod(0o755)
 
             result = subprocess.run(
-                ["bash", str(script_path)],
+                ["bash", bash_path(script_path)],
                 cwd=PROJECT_ROOT,
                 env={
                     **os.environ,
@@ -47,10 +68,12 @@ class StartAutomationChromeScriptTests(unittest.TestCase):
         self.assertIn(".xueqiu-chrome-profile", result.stdout)
 
     def test_script_uses_open_na_for_macos_app_bundle_dry_run(self) -> None:
+        if not bash_is_available():
+            self.skipTest("bash is installed but no runnable shell environment is available")
         script_path = PROJECT_ROOT / "scripts" / "start_automation_chrome.sh"
 
         result = subprocess.run(
-            ["bash", str(script_path)],
+            ["bash", bash_path(script_path)],
             cwd=PROJECT_ROOT,
             env={
                 **os.environ,

@@ -156,6 +156,24 @@ Required behavior:
 - when login interrupts extraction, keep the automation Chrome window open and wait for manual recovery before resuming the current pass
 - when verification interrupts extraction, automatically attempt the slider first and only then fall back to manual recovery in the same automation Chrome window
 
+### WeChat article link capture
+
+微信公众号抓取当前只支持用户提供的文章链接，不支持公众号主页自动发现文章。
+
+For one or more `mp.weixin.qq.com/s...` 文章链接:
+
+1. Put the links in a plain text file, one URL per line, or pass repeated `--article-url` values.
+2. Run `scripts/extract_wechat_articles.mjs` to produce a JSON array.
+3. Run `scripts/content_task.py` with that JSON file, the target date, and the same output root.
+4. Keep the normal same-day dedupe and summary steps unchanged.
+
+```text
+node scripts/extract_wechat_articles.mjs --input-file wechat-urls.txt --output-file processing/wechat-articles.json
+python scripts/content_task.py --input-file processing/wechat-articles.json --date YYYY-MM-DD --output-dir OUTPUT_ROOT
+```
+
+If a WeChat article URL is blocked, deleted, or lacks title/content, record the failure and do not fabricate article text.
+
 Local responsibility split for this step:
 
 - `scripts/start_automation_chrome.sh`: launch or reuse the dedicated automation Chrome instance

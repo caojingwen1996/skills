@@ -26,6 +26,20 @@ class OutputLayoutTests(unittest.TestCase):
         self.assertEqual(result_dir, output_root / "20260406" / "闵行一霸_-_雪球")
         self.assertEqual(log_file, output_root / "20260406" / "闵行一霸_-_雪球" / "task.log")
 
+    def test_content_task_supports_author_root_date_layout(self) -> None:
+        from scripts.content_task import build_result_paths
+
+        output_root = Path("E:/caojingwen/obsidian/source/冰冰小美")
+        result_dir, log_file = build_result_paths(
+            output_root,
+            "冰冰小美",
+            date(2026, 5, 25),
+            layout="author-root-date",
+        )
+
+        self.assertEqual(result_dir, output_root / "20260525")
+        self.assertEqual(log_file, output_root / "20260525" / "task.log")
+
     def test_output_root_defaults_to_extend_configuration(self) -> None:
         from scripts.utils import resolve_output_root
 

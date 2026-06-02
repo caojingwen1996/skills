@@ -1,6 +1,6 @@
 ---
 name: cjw-xueqiu-daily-monitor
-description: 当用户需要手动抓取一个或多个指定雪球账号主页的当日帖子、对同一天任务进行无重复补抓，或基于已保存的原始文本生成每位作者的 Markdown 汇总时使用。当用户说:“开启雪球任务” “抓取雪球帖子”时触发
+description: 当用户需要手动抓取一个或多个指定雪球账号主页的当日帖子、抓取一批微信公众号文章链接、对同一天任务进行无重复补抓，或基于已保存的原始文本生成每位作者的 Markdown 汇总时使用。当用户说:“开启雪球任务” “抓取雪球帖子” “抓取微信公众号文章”时触发
 ---
 
 # 雪球日常监控
@@ -19,6 +19,8 @@ description: 当用户需要手动抓取一个或多个指定雪球账号主页�
 - 目标日期解析
 - 同日重跑识别与去重
 - 原始文件和汇总输出要求
+
+也支持窄范围的微信公众号文章链接抓取：用户提供一个或多个 `mp.weixin.qq.com/s...` 文章链接时，使用 `scripts/extract_wechat_articles.mjs` 提取结构化 JSON，再复用现有保存流程写入原始 `.txt` 文件。当前不支持公众号主页自动发现文章。
 
 当任务需要访问主页、复用登录态、进行页面交互或从雪球页面提取内容时，必须使用本 skill 自带的浏览器访问层：
 
@@ -176,4 +178,5 @@ description: 当用户需要手动抓取一个或多个指定雪球账号主页�
 | [references/file-layout.md](references/file-layout.md) | 原始文件命名和单文件内容格式 |
 | [scripts/start_automation_chrome.sh](scripts/start_automation_chrome.sh) | 启动固定自动化 Chrome/CDP 实例 |
 | [scripts/extract_xueqiu_posts.mjs](scripts/extract_xueqiu_posts.mjs) | 通过本地 CDP 访问雪球主页并提取结构化帖子 JSON |
+| [scripts/extract_wechat_articles.mjs](scripts/extract_wechat_articles.mjs) | 从微信公众号文章链接提取结构化文章 JSON |
 | [scripts/task_store.py](scripts/task_store.py) | 状态与去重工具 |

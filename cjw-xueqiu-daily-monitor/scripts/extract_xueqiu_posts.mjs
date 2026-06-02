@@ -26,6 +26,8 @@ function printHelp() {
       "  --profile-dir PATH     Chrome profile dir; defaults to scripts/.xueqiu-chrome-profile",
       "  --debug-port PORT      Remote debugging port; defaults to 9333",
       "  --max-posts N          Maximum detail pages to extract; defaults to 30",
+      "  --capture-scope SCOPE  daily | all-visible; defaults to daily",
+      "  --comment-scope SCOPE  none | author-only | all; defaults to none",
       "  --verification-mode MODE  manual | auto-then-manual | auto-only; defaults to auto-then-manual",
       "  --headless             Launch Chrome in headless mode when starting a new instance",
       "  --help                 Show this help",
@@ -67,6 +69,15 @@ export function inferPostDate(rawText, targetDate, now = new Date()) {
   }
 
   let match = normalized.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s+\d{1,2}:\d{2}(?::\d{2})?/);
+  if (match) {
+    return formatDateParts(
+      Number.parseInt(match[1], 10),
+      Number.parseInt(match[2], 10),
+      Number.parseInt(match[3], 10)
+    );
+  }
+
+  match = normalized.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
   if (match) {
     return formatDateParts(
       Number.parseInt(match[1], 10),
@@ -118,6 +129,45 @@ const VERIFICATION_PAYLOAD_PATTERN =
 const LOGIN_PAYLOAD_PATTERN =
   /(登录雪球|登录后(?:即可|可)?(?:查看|继续|发帖|评论|互动)|请先登录|立即登录|注册登录|账号密码登录|手机验证码登录)/;
 const VERIFICATION_MODES = new Set(["manual", "auto-then-manual", "auto-only"]);
+const CAPTURE_SCOPES = new Set(["daily", "all-visible"]);
+const COMMENT_SCOPES = new Set(["none", "author-only", "all"]);
+
+export function isXueqiuPostUrl(value) {
+  return /^https?:\/\/xueqiu\.com\/\d+\/\d+(?:[?#].*)?$/.test(String(value || ""));
+}
+
+export function shouldKeepCandidateForCaptureScope(candidate, targetDate, captureScope, now = new Date()) {
+  if (captureScope === "all-visible") return true;
+  return shouldKeepCandidateForTargetDate(candidate, targetDate, now);
+}
+
+function normalizeComment(value) {
+  const authorName = String(value?.author_name || "").trim();
+  const content = String(value?.content || "").trim();
+  const publishedAt = String(value?.published_at || "").trim();
+  if (!content) return null;
+  return {
+    author_name: authorName,
+    published_at: publishedAt,
+    content,
+  };
+}
+
+export function filterCommentsForScope(comments, commentScope, authorName) {
+  if (commentScope === "none") return [];
+  const normalizedAuthor = String(authorName || "").trim();
+  return (comments || [])
+    .map((comment) => normalizeComment(comment))
+    .filter(Boolean)
+    .filter((comment) => {
+      if (commentScope === "all") return true;
+      return Boolean(normalizedAuthor) && (
+        comment.author_name === normalizedAuthor ||
+        comment.author_name.startsWith(normalizedAuthor) ||
+        comment.content.startsWith(normalizedAuthor)
+      );
+    });
+}
 
 export function classifyManualActionPayload(payload) {
   const text = [
@@ -179,6 +229,8 @@ function parseArgs(argv) {
     profileDir: "",
     debugPort: Number.parseInt(process.env.XUEQIU_CHROME_DEBUG_PORT ?? "9333", 10),
     maxPosts: 30,
+    captureScope: "daily",
+    commentScope: "none",
     verificationMode: "auto-then-manual",
     headless: false,
   };
@@ -207,6 +259,12 @@ function parseArgs(argv) {
       case "--max-posts":
         args.maxPosts = Number.parseInt(argv[++index] ?? "", 10);
         break;
+      case "--capture-scope":
+        args.captureScope = argv[++index] ?? "";
+        break;
+      case "--comment-scope":
+        args.commentScope = argv[++index] ?? "";
+        break;
       case "--verification-mode":
         args.verificationMode = argv[++index] ?? "";
         break;
@@ -232,6 +290,12 @@ function parseArgs(argv) {
   if (!Number.isInteger(args.maxPosts) || args.maxPosts <= 0) {
     throw new Error("--max-posts must be a positive integer");
   }
+  if (!CAPTURE_SCOPES.has(args.captureScope)) {
+    throw new Error("--capture-scope must be one of: daily, all-visible");
+  }
+  if (!COMMENT_SCOPES.has(args.commentScope)) {
+    throw new Error("--comment-scope must be one of: none, author-only, all");
+  }
   if (!VERIFICATION_MODES.has(args.verificationMode)) {
     throw new Error("--verification-mode must be one of: manual, auto-then-manual, auto-only");
   }
@@ -241,6 +305,20 @@ function parseArgs(argv) {
 
 export function parseArgsForTesting(argv) {
   return parseArgs(argv);
+}
+
+export function resolveProfileDirForTesting(metaUrl, explicitProfileDir) {
+  const scriptDir = path.dirname(fileURLToPath(metaUrl));
+  return path.resolve(explicitProfileDir || path.join(scriptDir, ".xueqiu-chrome-profile"));
+}
+
+async function isChromeDebugPortUsable(port) {
+  try {
+    await waitForChromeDebugPort(port, 1_000);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function shouldFallbackToManualWait(mode, autoVerificationSucceeded) {
@@ -274,6 +352,24 @@ async function waitForDocumentReady(cdp, sessionId, timeoutMs = 20_000) {
     await sleep(200);
   }
   throw new Error("Timed out waiting for document.readyState");
+}
+
+async function scrollDetailForComments(cdp, sessionId, commentScope) {
+  if (commentScope === "none") return;
+  await evaluateJson(
+    cdp,
+    sessionId,
+    `
+      (async () => {
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        for (let i = 0; i < 4; i += 1) {
+          window.scrollTo(0, document.body.scrollHeight);
+          await sleep(500);
+        }
+      })()
+    `,
+    true
+  );
 }
 
 export function buildHumanLikeDragPath({
@@ -357,11 +453,12 @@ function buildVerificationWidgetInspectionScript() {
   `;
 }
 
-function buildHomepageExtractionScript(maxPosts) {
+function buildHomepageExtractionScript(maxPosts, captureScope = "daily") {
+  const scrollRounds = captureScope === "all-visible" ? 5 : 5;
   return `
     (async () => {
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-      for (let i = 0; i < 5; i += 1) {
+      for (let i = 0; i < ${JSON.stringify(scrollRounds)}; i += 1) {
         window.scrollTo(0, document.body.scrollHeight);
         await sleep(600);
       }
@@ -371,6 +468,7 @@ function buildHomepageExtractionScript(maxPosts) {
         const source = String(text || "");
         const patterns = [
           /\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}\\s+\\d{1,2}:\\d{2}(?::\\d{2})?/,
+          /\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}/,
           /(?:今天|昨天|昨日)\\s*\\d{1,2}:\\d{2}/,
           /\\d+\\s*(?:分钟前|小时前)/,
           /\\b\\d{1,2}:\\d{2}(?::\\d{2})?\\b/,
@@ -421,9 +519,10 @@ function buildHomepageExtractionScript(maxPosts) {
   `;
 }
 
-function buildDetailExtractionScript() {
+function buildDetailExtractionScript(commentScope = "none") {
   return `
     (() => {
+      const commentScope = ${JSON.stringify(commentScope)};
       const bodyText = (document.body?.innerText || "").trim();
       const candidateTitle = [
         document.querySelector("h1")?.innerText,
@@ -435,6 +534,7 @@ function buildDetailExtractionScript() {
         const source = String(text || "");
         const patterns = [
           /\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}\\s+\\d{1,2}:\\d{2}(?::\\d{2})?/,
+          /\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}/,
           /(?:今天|昨天|昨日)\\s*\\d{1,2}:\\d{2}/,
           /\\d+\\s*(?:分钟前|小时前)/,
           /\\b\\d{1,2}:\\d{2}(?::\\d{2})?\\b/,
@@ -450,28 +550,123 @@ function buildDetailExtractionScript() {
         .map((node) => (node.innerText || "").trim())
         .find(Boolean) || "";
 
+      const extractComments = () => {
+        if (commentScope === "none") return [];
+        const commentNodes = Array.from(document.querySelectorAll(
+          "[class*='comment'], [class*='reply'], [class*='Comment'], [class*='Reply']"
+        ));
+        const seen = new Set();
+        const comments = [];
+        for (const node of commentNodes) {
+          const text = (node.innerText || "").trim();
+          if (!text || text.length < 2 || seen.has(text)) continue;
+          seen.add(text);
+          const lines = text.split(/\\n+/).map((item) => item.trim()).filter(Boolean);
+          const commentAuthor = Array.from(node.querySelectorAll(
+            "a, [class*='user'], [class*='author'], [class*='name'], [class*='User'], [class*='Author'], [class*='Name']"
+          ))
+            .map((item) => (item.innerText || "").trim())
+            .find(Boolean) || lines[0] || "";
+          comments.push({
+            author_name: commentAuthor,
+            published_at: inferPublishedAt(text),
+            content: text,
+          });
+        }
+        return comments;
+      };
+
       return {
         title: String(candidateTitle).trim(),
         published_at: inferPublishedAt(bodyText),
         author_name: author,
         content: bodyText,
         url: location.href,
+        comments: extractComments(),
       };
     })()
   `;
 }
 
-function normalizePost(candidate, detail, fallbackAuthor) {
+function buildClickNextColumnPageScript() {
+  return `
+    (() => {
+      const controls = Array.from(document.querySelectorAll("a, button, [role='button']"));
+      const next = controls.find((node) => (node.innerText || node.textContent || "").trim() === "下一页");
+      if (!next) return { clicked: false, reason: "missing" };
+      const text = (next.innerText || next.textContent || "").trim();
+      const className = String(next.className || "");
+      const disabled = next.disabled ||
+        next.getAttribute("aria-disabled") === "true" ||
+        /disabled|inactive/.test(className);
+      if (disabled) return { clicked: false, reason: "disabled", text };
+      next.scrollIntoView({ block: "center" });
+      next.click();
+      return { clicked: true, text };
+    })()
+  `;
+}
+
+async function extractHomepageCandidates(cdp, sessionId, args) {
+  const seenUrls = new Set();
+  const allCandidates = [];
+  const maxPages = args.captureScope === "all-visible" ? 20 : 1;
+
+  for (let pageIndex = 0; pageIndex < maxPages && allCandidates.length < args.maxPosts; pageIndex += 1) {
+    const remaining = args.maxPosts - allCandidates.length;
+    const pageCandidates = await evaluateJson(
+      cdp,
+      sessionId,
+      buildHomepageExtractionScript(remaining, args.captureScope),
+      true
+    );
+    let added = 0;
+    for (const candidate of pageCandidates ?? []) {
+      const url = String(candidate?.url || "").trim();
+      if (!url || seenUrls.has(url)) continue;
+      seenUrls.add(url);
+      allCandidates.push(candidate);
+      added += 1;
+      if (allCandidates.length >= args.maxPosts) break;
+    }
+
+    if (args.captureScope !== "all-visible" || allCandidates.length >= args.maxPosts) break;
+
+    const clickResult = await evaluateJson(cdp, sessionId, buildClickNextColumnPageScript(), false);
+    if (!clickResult?.clicked) break;
+    await sleep(1_500);
+
+    if (added === 0) {
+      const afterClickCandidates = await evaluateJson(
+        cdp,
+        sessionId,
+        buildHomepageExtractionScript(remaining, args.captureScope),
+        true
+      );
+      const hasNewAfterClick = (afterClickCandidates ?? []).some((candidate) => {
+        const url = String(candidate?.url || "").trim();
+        return url && !seenUrls.has(url);
+      });
+      if (!hasNewAfterClick) break;
+    }
+  }
+
+  return allCandidates;
+}
+
+function normalizePost(candidate, detail, fallbackAuthor, commentScope = "none") {
   const url = detail.url || candidate.url;
   const title = detail.title || candidate.title || url;
   const publishedAt = detail.published_at || candidate.published_at || "";
   const content = detail.content || candidate.content_snippet || "";
+  const authorName = String(detail.author_name || candidate.author_name || fallbackAuthor || "").trim();
   return {
     title: String(title).trim(),
     published_at: String(publishedAt).trim(),
     url: String(url).trim(),
     content: String(content).trim(),
-    author_name: String(detail.author_name || candidate.author_name || fallbackAuthor || "").trim(),
+    author_name: authorName,
+    author_comments: filterCommentsForScope(detail.comments, commentScope, authorName || fallbackAuthor),
   };
 }
 
@@ -641,11 +836,13 @@ async function waitForManualActionCompletion(cdp, sessionId, reason, timeoutMs =
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const targetDate = args.date;
-  const scriptDir = path.dirname(new URL(import.meta.url).pathname);
-  const profileDir = path.resolve(args.profileDir || path.join(scriptDir, ".xueqiu-chrome-profile"));
+  const profileDir = resolveProfileDirForTesting(import.meta.url, args.profileDir);
 
   let launchedChrome = null;
   let debugPort = await findExistingChromeDebugPort({ profileDir, timeoutMs: 3_000 });
+  if (!debugPort && await isChromeDebugPortUsable(args.debugPort)) {
+    debugPort = args.debugPort;
+  }
   if (!debugPort) {
     debugPort = args.debugPort;
     const chromePath = findChromeExecutable({
@@ -655,6 +852,14 @@ async function main() {
           "/Applications/Chromium.app/Contents/MacOS/Chromium",
           path.join(process.env.HOME ?? "", "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
           path.join(process.env.HOME ?? "", "Applications/Chromium.app/Contents/MacOS/Chromium"),
+        ],
+        win32: [
+          path.join(process.env.PROGRAMFILES ?? "", "Google/Chrome/Application/chrome.exe"),
+          path.join(process.env["PROGRAMFILES(X86)"] ?? "", "Google/Chrome/Application/chrome.exe"),
+          path.join(process.env.LOCALAPPDATA ?? "", "Google/Chrome/Application/chrome.exe"),
+          path.join(process.env.PROGRAMFILES ?? "", "Microsoft/Edge/Application/msedge.exe"),
+          path.join(process.env["PROGRAMFILES(X86)"] ?? "", "Microsoft/Edge/Application/msedge.exe"),
+          path.join(process.env.LOCALAPPDATA ?? "", "Microsoft/Edge/Application/msedge.exe"),
         ],
         default: [
           "/usr/bin/google-chrome",
@@ -708,15 +913,12 @@ async function main() {
       await sleep(2_000);
     }
 
-    const candidates = await evaluateJson(
-      cdp,
-      homepage.sessionId,
-      buildHomepageExtractionScript(args.maxPosts),
-      true
-    );
+    const candidates = await extractHomepageCandidates(cdp, homepage.sessionId, args);
 
     const posts = [];
-    for (const candidate of (candidates ?? []).filter((item) => shouldKeepCandidateForTargetDate(item, targetDate))) {
+    for (const candidate of (candidates ?? []).filter((item) =>
+      shouldKeepCandidateForCaptureScope(item, targetDate, args.captureScope)
+    )) {
       let detailSession = null;
       let closeDetailTarget = true;
       try {
@@ -733,9 +935,10 @@ async function main() {
         await cdp.send("Page.navigate", { url: candidate.url }, { sessionId: detailSession.sessionId });
         await waitForDocumentReady(cdp, detailSession.sessionId);
         await sleep(1_000);
+        await scrollDetailForComments(cdp, detailSession.sessionId, args.commentScope);
 
-        let detail = await evaluateJson(cdp, detailSession.sessionId, buildDetailExtractionScript(), false);
-        let normalized = normalizePost(candidate, detail, args.authorName);
+        let detail = await evaluateJson(cdp, detailSession.sessionId, buildDetailExtractionScript(args.commentScope), false);
+        let normalized = normalizePost(candidate, detail, args.authorName, args.commentScope);
         const manualActionReason = classifyManualActionPayload(normalized);
         if (manualActionReason) {
           manualActionBlocked = true;
@@ -747,8 +950,9 @@ async function main() {
           await cdp.send("Page.navigate", { url: candidate.url }, { sessionId: detailSession.sessionId });
           await waitForDocumentReady(cdp, detailSession.sessionId);
           await sleep(1_000);
-          detail = await evaluateJson(cdp, detailSession.sessionId, buildDetailExtractionScript(), false);
-          normalized = normalizePost(candidate, detail, args.authorName);
+          await scrollDetailForComments(cdp, detailSession.sessionId, args.commentScope);
+          detail = await evaluateJson(cdp, detailSession.sessionId, buildDetailExtractionScript(args.commentScope), false);
+          normalized = normalizePost(candidate, detail, args.authorName, args.commentScope);
           if (classifyManualActionPayload(normalized)) {
             throw new Error(`Manual action completed but ${candidate.url} is still blocked.`);
           }
