@@ -12,10 +12,13 @@ function printHelp() {
       "",
       "Options:",
       "  --article-url URL      WeChat article URL, repeatable",
+      "  --history-url URL      WeChat history/home page URL used to discover article links",
       "  --input-file PATH      Text or JSON file containing article URLs",
       "  --output-file PATH     Optional JSON output path; defaults to stdout",
       "  --author-name NAME     Optional author name fallback",
       "  --html-file PATH       Parse this local HTML file instead of fetching; intended for offline checks",
+      "  --history-html-file PATH  Parse this local history HTML file instead of fetching --history-url",
+      "  --date YYYY-MM-DD      Keep only articles published on this date",
       "  --help                 Show this help",
       "",
     ].join("\n")
@@ -25,10 +28,13 @@ function printHelp() {
 function parseArgs(argv) {
   const args = {
     articleUrls: [],
+    historyUrl: "",
     inputFile: "",
     outputFile: "",
     authorName: "",
     htmlFile: "",
+    historyHtmlFile: "",
+    date: "",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -37,6 +43,9 @@ function parseArgs(argv) {
       args.help = true;
     } else if (value === "--article-url") {
       args.articleUrls.push(requireValue(argv, index, value));
+      index += 1;
+    } else if (value === "--history-url") {
+      args.historyUrl = requireValue(argv, index, value);
       index += 1;
     } else if (value === "--input-file") {
       args.inputFile = requireValue(argv, index, value);
@@ -49,6 +58,12 @@ function parseArgs(argv) {
       index += 1;
     } else if (value === "--html-file") {
       args.htmlFile = requireValue(argv, index, value);
+      index += 1;
+    } else if (value === "--history-html-file") {
+      args.historyHtmlFile = requireValue(argv, index, value);
+      index += 1;
+    } else if (value === "--date") {
+      args.date = requireValue(argv, index, value);
       index += 1;
     } else {
       throw new Error(`Unknown option: ${value}`);
@@ -75,6 +90,50 @@ export function isWechatArticleUrl(value) {
   }
   if (parsed.hostname !== "mp.weixin.qq.com") return false;
   return parsed.pathname === "/s" || parsed.pathname.startsWith("/s/");
+}
+
+function normalizeWechatArticleUrl(value, baseUrl) {
+  const raw = normalizeWhitespace(value).replace(/\\u0026/g, "&");
+  const candidates = [raw];
+  try {
+    candidates.push(decodeURIComponent(raw));
+  } catch {
+    // Keep the raw candidate when percent decoding fails.
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = new URL(candidate, baseUrl || "https://mp.weixin.qq.com/");
+      if (isWechatArticleUrl(parsed.href)) {
+        parsed.hash = "";
+        return parsed.href;
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return "";
+}
+
+export function extractWechatArticleUrlsFromHistoryHtml(html, baseUrl = "https://mp.weixin.qq.com/") {
+  const text = String(html || "");
+  const found = [];
+  const patterns = [
+    /\bhref\s*=\s*["']([^"']+)["']/gi,
+    /https?:\/\/mp\.weixin\.qq\.com\/s(?:\/|%2F|\?)[^"'<>\s\\]+/gi,
+    /https?%3A%2F%2Fmp\.weixin\.qq\.com%2Fs(?:%2F|%3F)[^"'<>\s\\]+/gi,
+    /\/s\/[^"'<>\s\\]+/gi,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const value = match[1] || match[0];
+      const normalized = normalizeWechatArticleUrl(value, baseUrl);
+      if (normalized) found.push(normalized);
+    }
+  }
+
+  return [...new Set(found)];
 }
 
 function decodeHtmlEntities(value) {
@@ -237,6 +296,10 @@ export function extractWechatArticleFromHtml(html, url, options = {}) {
 
 async function readInputUrls(args) {
   const urls = [...args.articleUrls];
+  if (args.historyUrl) {
+    const html = args.historyHtmlFile ? await fs.readFile(args.historyHtmlFile, "utf-8") : await fetchWechatHtml(args.historyUrl);
+    urls.push(...extractWechatArticleUrlsFromHistoryHtml(html, args.historyUrl));
+  }
   if (args.inputFile) {
     const text = await fs.readFile(args.inputFile, "utf-8");
     const trimmed = text.trim();
@@ -284,6 +347,9 @@ async function extractArticles(args) {
       const article = extractWechatArticleFromHtml(html, url, { authorName: args.authorName });
       if (!article.title || !article.content) {
         throw new Error("Article title or content was not found.");
+      }
+      if (args.date && !String(article.published_at || "").startsWith(args.date)) {
+        continue;
       }
       articles.push(article);
     } catch (error) {

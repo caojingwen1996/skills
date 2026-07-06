@@ -154,11 +154,11 @@ Required behavior:
 - do not enter automatic loops
 - do not invent scheduling behavior
 - when login interrupts extraction, keep the automation Chrome window open and wait for manual recovery before resuming the current pass
-- when verification interrupts extraction, automatically attempt the slider first and only then fall back to manual recovery in the same automation Chrome window
+- when verification interrupts extraction, first attempt DOM-based slider detection, then screenshot-based visual fallback, and only then fall back to manual recovery in the same automation Chrome window
 
-### WeChat article link capture
+### WeChat article link and history page capture
 
-微信公众号抓取当前只支持用户提供的文章链接，不支持公众号主页自动发现文章。
+微信公众号抓取支持直接文章链接，也支持从可访问的公众号主页/历史消息页面发现文章链接。
 
 For one or more `mp.weixin.qq.com/s...` 文章链接:
 
@@ -172,12 +172,19 @@ node scripts/extract_wechat_articles.mjs --input-file wechat-urls.txt --output-f
 python scripts/content_task.py --input-file processing/wechat-articles.json --date YYYY-MM-DD --output-dir OUTPUT_ROOT
 ```
 
-If a WeChat article URL is blocked, deleted, or lacks title/content, record the failure and do not fabricate article text.
+For a 公众号主页/历史消息 page that already contains article links:
+
+```text
+node scripts/extract_wechat_articles.mjs --history-url HISTORY_URL --date YYYY-MM-DD --output-file processing/wechat-articles.json
+python scripts/content_task.py --input-file processing/wechat-articles.json --date YYYY-MM-DD --output-dir OUTPUT_ROOT
+```
+
+If a WeChat article URL or history page is blocked, deleted, lacks discoverable links, or lacks title/content, record the failure and do not fabricate article text.
 
 Local responsibility split for this step:
 
 - `scripts/start_automation_chrome.sh`: launch or reuse the dedicated automation Chrome instance
-- `scripts/extract_xueqiu_posts.mjs`: homepage access, page interaction, login-state reuse, verification auto-attempt with manual fallback, DOM extraction
+- `scripts/extract_xueqiu_posts.mjs`: homepage access, page interaction, login-state reuse, DOM-first verification auto-attempt with screenshot-based visual fallback, manual fallback, DOM extraction
 - `scripts/task_store.py`: state file, deduplication, scan rounds, logs
 - `scripts/content_task.py`: consume extracted post JSON, filter by target date, deduplicate, and save raw `.txt` files
 
@@ -400,6 +407,7 @@ At the end of a run, report:
 - whether this was a new run or rerun
 - output root
 - per-author summary locations
+- day-level `daily_brief.md` location
 - processing directory
 - unresolved failures, if any
 
@@ -423,3 +431,26 @@ Stop and tell the user before continuing when any of the following happens:
 - risk-control prompt appeared and does not recover within the wait window
 
 Detailed failure handling: [error-policy.md](error-policy.md)
+## Weibo Extension
+
+The same day-scoped workflow also applies to 微博 homepage capture through `scripts/extract_weibo_posts.mjs`.
+Saved raw source files are Markdown documents rather than `.txt` files.
+
+## Daily Brief Extension
+
+After all enabled accounts for the target date have finished their per-author summaries:
+
+1. load the saved raw Markdown files for that date across all author directories
+2. load each author's `summary.md`
+3. synthesize one date-level brief at `{yyyymmdd}/daily_brief.md`
+4. follow the structure reference in `demo.md`
+5. keep the final structure aligned with [daily-brief-format.md](daily-brief-format.md)
+
+Rules:
+
+- this is a whole-day synthesis, not another per-author summary
+- treat `daily_brief.md` as the target date's 今日简报
+- the brief must be based on the current saved articles for that date
+- if the saved material is too thin for a section in `demo.md`, state that evidence is insufficient instead of fabricating
+- do not overwrite per-author `summary.md`
+- keep `daily_brief.md` at the date root, not inside any author directory

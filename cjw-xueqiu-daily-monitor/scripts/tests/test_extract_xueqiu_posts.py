@@ -54,16 +54,39 @@ import {{ inferPostDate, shouldKeepCandidateForTargetDate }} from {json.dumps(sc
 console.log(JSON.stringify({{
   exact: inferPostDate("2026-04-11 19:05", "2026-04-11"),
   keepTarget: shouldKeepCandidateForTargetDate({{ published_at: "2026-04-11 19:05" }}, "2026-04-11"),
+  keepTimeOnly: shouldKeepCandidateForTargetDate({{ published_at: "19:05" }}, "2026-04-11"),
   dropOther: shouldKeepCandidateForTargetDate({{ published_at: "2026-04-10 17:35" }}, "2026-04-11"),
-  keepUnknown: shouldKeepCandidateForTargetDate({{ published_at: "" }}, "2026-04-11"),
+  dropUnknown: shouldKeepCandidateForTargetDate({{ published_at: "" }}, "2026-04-11"),
+  dropSnippetOnly: shouldKeepCandidateForTargetDate({{
+    published_at: "",
+    content_snippet: "引用 2026-04-10 08:30 的旧内容"
+  }}, "2026-04-11"),
 }}));
 """
         )
 
         self.assertEqual(payload["exact"], "2026-04-11")
         self.assertTrue(payload["keepTarget"])
+        self.assertTrue(payload["keepTimeOnly"])
         self.assertFalse(payload["dropOther"])
-        self.assertTrue(payload["keepUnknown"])
+        self.assertFalse(payload["dropUnknown"])
+        self.assertFalse(payload["dropSnippetOnly"])
+
+    def test_target_date_filter_prefers_published_by_marker(self) -> None:
+        script_path = (PROJECT_ROOT / "scripts" / "extract_xueqiu_posts.mjs").as_uri()
+        payload = self.run_node_module_json(
+            f"""
+import {{ inferPostDate, shouldKeepCandidateForTargetDate }} from {json.dumps(script_path)};
+const text = "引用 2026-04-10 08:30 的旧内容\\n发布于 2026-04-11 19:05\\n正文开始";
+console.log(JSON.stringify({{
+  inferred: inferPostDate(text, "2026-04-11"),
+  keep: shouldKeepCandidateForTargetDate({{ content_snippet: text }}, "2026-04-11")
+}}));
+"""
+        )
+
+        self.assertEqual(payload["inferred"], "2026-04-11")
+        self.assertTrue(payload["keep"])
 
     def test_manual_action_payload_detection(self) -> None:
         script_path = (PROJECT_ROOT / "scripts" / "extract_xueqiu_posts.mjs").as_uri()
@@ -301,6 +324,67 @@ console.log(JSON.stringify({{
         self.assertEqual(payload["last"]["x"], 120)
         self.assertEqual(payload["last"]["y"], 20)
         self.assertTrue(payload["hasBacktrack"])
+
+    def test_select_best_verification_widget_prefers_aligned_track_pair(self) -> None:
+        script_path = (PROJECT_ROOT / "scripts" / "extract_xueqiu_posts.mjs").as_uri()
+        payload = self.run_node_module_json(
+            f"""
+import {{ selectBestVerificationWidget }} from {json.dumps(script_path)};
+const widget = selectBestVerificationWidget([
+  {{
+    left: 12,
+    top: 60,
+    width: 48,
+    height: 48,
+    text: "",
+    background: "rgb(255, 120, 24)"
+  }},
+  {{
+    left: 12,
+    top: 60,
+    width: 320,
+    height: 48,
+    text: "请按住滑块，拖动到最右边",
+    background: "rgb(238, 238, 238)"
+  }},
+  {{
+    left: 400,
+    top: 10,
+    width: 80,
+    height: 80,
+    text: "",
+    background: "rgb(255, 255, 255)"
+  }}
+]);
+console.log(JSON.stringify(widget));
+"""
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertAlmostEqual(payload["handleX"], 36)
+        self.assertAlmostEqual(payload["handleY"], 84)
+        self.assertAlmostEqual(payload["endX"], 306)
+        self.assertAlmostEqual(payload["endY"], 84)
+
+    def test_build_visual_verification_geometry_from_color_regions(self) -> None:
+        script_path = (PROJECT_ROOT / "scripts" / "extract_xueqiu_posts.mjs").as_uri()
+        payload = self.run_node_module_json(
+            f"""
+import {{ buildVisualVerificationGeometry }} from {json.dumps(script_path)};
+const geometry = buildVisualVerificationGeometry({{
+  clipLeft: 100,
+  clipTop: 200,
+  orangeBox: {{ left: 8, top: 28, right: 56, bottom: 76 }},
+  trackBox: {{ left: 8, top: 28, right: 340, bottom: 76 }}
+}});
+console.log(JSON.stringify(geometry));
+"""
+        )
+
+        self.assertEqual(payload["handleX"], 132)
+        self.assertEqual(payload["handleY"], 252)
+        self.assertEqual(payload["endX"], 414)
+        self.assertEqual(payload["endY"], 252)
 
 
 if __name__ == "__main__":

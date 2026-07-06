@@ -54,6 +54,30 @@ function parseIsoDate(dateText) {
   };
 }
 
+function extractPublishedMarkerValue(rawText) {
+  const normalized = String(rawText || "")
+    .replace(/年/g, "-")
+    .replace(/月/g, "-")
+    .replace(/日/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return "";
+
+  const patterns = [
+    /发布于\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?)/,
+    /发布于\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})/,
+    /发布于\s*((?:今天|昨天|昨日)\s*\d{1,2}:\d{2})/,
+    /发布于\s*(\d+\s*(?:分钟前|小时前))/,
+    /发布于\s*(\d{1,2}:\d{2}(?::\d{2})?)/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return "";
+}
+
 export function inferPostDate(rawText, targetDate, now = new Date()) {
   const normalized = String(rawText || "")
     .replace(/年/g, "-")
@@ -66,6 +90,11 @@ export function inferPostDate(rawText, targetDate, now = new Date()) {
   const targetParts = parseIsoDate(targetDate);
   if (!targetParts) {
     throw new Error(`Invalid target date: ${targetDate}`);
+  }
+
+  const publishedMarkerValue = extractPublishedMarkerValue(normalized);
+  if (publishedMarkerValue) {
+    return inferPostDate(publishedMarkerValue, targetDate, now);
   }
 
   let match = normalized.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s+\d{1,2}:\d{2}(?::\d{2})?/);
@@ -119,9 +148,13 @@ export function inferPostDate(rawText, targetDate, now = new Date()) {
 }
 
 export function shouldKeepCandidateForTargetDate(candidate, targetDate, now = new Date()) {
-  const rawPublishedAt = String(candidate?.published_at || candidate?.content_snippet || "").trim();
-  const inferredDate = inferPostDate(rawPublishedAt, targetDate, now);
-  return !inferredDate || inferredDate === targetDate;
+  const rawPublishedAt = String(candidate?.published_at || "").trim();
+  const markerPublishedAt = rawPublishedAt
+    ? ""
+    : extractPublishedMarkerValue(String(candidate?.content_snippet || "").trim());
+  const candidatePublishedAt = rawPublishedAt || markerPublishedAt;
+  const inferredDate = inferPostDate(candidatePublishedAt, targetDate, now);
+  return inferredDate === targetDate;
 }
 
 const VERIFICATION_PAYLOAD_PATTERN =
@@ -405,6 +438,131 @@ export function buildHumanLikeDragPath({
   return points;
 }
 
+function clamp(value, minValue, maxValue) {
+  return Math.min(Math.max(value, minValue), maxValue);
+}
+
+function parseRgbColor(value) {
+  const match = String(value || "").match(/rgba?\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (!match) return null;
+  return {
+    r: Number.parseInt(match[1], 10),
+    g: Number.parseInt(match[2], 10),
+    b: Number.parseInt(match[3], 10),
+  };
+}
+
+function isLikelyOrangeColor(value) {
+  const parsed = parseRgbColor(value);
+  if (!parsed) return false;
+  return parsed.r >= 210 && parsed.g >= 80 && parsed.g <= 190 && parsed.b <= 110;
+}
+
+function isLikelyGrayTrackColor(value) {
+  const parsed = parseRgbColor(value);
+  if (!parsed) return false;
+  const spread = Math.max(parsed.r, parsed.g, parsed.b) - Math.min(parsed.r, parsed.g, parsed.b);
+  return spread <= 18 && parsed.r >= 210 && parsed.r <= 245;
+}
+
+function normalizeRectCandidate(candidate) {
+  const width = Number(candidate?.width);
+  const height = Number(candidate?.height);
+  const left = Number(candidate?.left);
+  const top = Number(candidate?.top);
+  if (![width, height, left, top].every(Number.isFinite) || width <= 0 || height <= 0) {
+    return null;
+  }
+
+  return {
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    text: String(candidate?.text || "").trim(),
+    background: String(candidate?.background || "").trim(),
+  };
+}
+
+export function buildVisualVerificationGeometry({ clipLeft, clipTop, orangeBox, trackBox }) {
+  const orangeWidth = Number(orangeBox?.right) - Number(orangeBox?.left);
+  const orangeCenterY = (Number(orangeBox?.top) + Number(orangeBox?.bottom)) / 2;
+  return {
+    handleX: Math.round(Number(clipLeft) + Number(orangeBox?.left) + orangeWidth / 2),
+    handleY: Math.round(Number(clipTop) + orangeCenterY),
+    endX: Math.round(Number(clipLeft) + Number(trackBox?.right) - orangeWidth / 2 - 2),
+    endY: Math.round(Number(clipTop) + orangeCenterY),
+  };
+}
+
+export function selectBestVerificationWidget(candidates) {
+  const normalized = (candidates || []).map((candidate) => normalizeRectCandidate(candidate)).filter(Boolean);
+  if (normalized.length === 0) return null;
+
+  const handles = normalized.filter((candidate) => {
+    const aspectRatio = Math.max(candidate.width, candidate.height) / Math.min(candidate.width, candidate.height);
+    return (
+      candidate.width >= 24 &&
+      candidate.width <= 120 &&
+      candidate.height >= 24 &&
+      candidate.height <= 120 &&
+      aspectRatio <= 1.8
+    );
+  });
+  const tracks = normalized.filter((candidate) => (
+    candidate.width >= 140 &&
+    candidate.height >= 28 &&
+    candidate.height <= 90
+  ));
+
+  let bestPair = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const handle of handles) {
+    for (const track of tracks) {
+      if (track === handle) continue;
+      if (track.right <= handle.right + 40) continue;
+      if (track.left > handle.left + 20) continue;
+      if (track.top > handle.bottom || track.bottom < handle.top) continue;
+
+      const handleCenterY = handle.top + handle.height / 2;
+      const trackCenterY = track.top + track.height / 2;
+      const verticalDelta = Math.abs(handleCenterY - trackCenterY);
+      if (verticalDelta > Math.max(18, track.height * 0.5)) continue;
+
+      const overlapTop = Math.max(handle.top, track.top);
+      const overlapBottom = Math.min(handle.bottom, track.bottom);
+      const overlapHeight = Math.max(0, overlapBottom - overlapTop);
+      const overlapRatio = overlapHeight / Math.max(1, Math.min(handle.height, track.height));
+
+      let score = overlapRatio * 120;
+      score -= verticalDelta * 1.5;
+      score -= Math.abs(track.left - handle.left) * 0.6;
+      score += Math.max(0, track.width - handle.width) * 0.08;
+      if (isLikelyOrangeColor(handle.background)) score += 60;
+      if (isLikelyGrayTrackColor(track.background)) score += 30;
+      if (VERIFICATION_PAYLOAD_PATTERN.test(track.text)) score += 15;
+      if (handle.text) score -= 20;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestPair = { handle, track };
+      }
+    }
+  }
+
+  if (!bestPair || bestScore < 40) return null;
+
+  return {
+    handleX: bestPair.handle.left + bestPair.handle.width / 2,
+    handleY: bestPair.handle.top + bestPair.handle.height / 2,
+    endX: bestPair.track.right - bestPair.handle.width / 2 - 2,
+    endY: bestPair.handle.top + bestPair.handle.height / 2,
+  };
+}
+
 function buildVerificationWidgetInspectionScript() {
   return `
     (() => {
@@ -466,6 +624,17 @@ function buildHomepageExtractionScript(maxPosts, captureScope = "daily") {
       const postUrlPattern = /^https?:\\/\\/xueqiu\\.com\\/\\d+\\/\\d+(?:\\?.*)?$/;
       const inferPublishedAt = (text) => {
         const source = String(text || "");
+        const publishedMarkerPatterns = [
+          /发布于\\s*(\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)/,
+          /发布于\\s*(\\d{4}[-/]\\d{1,2}[-/]\\d{1,2})/,
+          /发布于\\s*((?:今天|昨天|昨日)\\s*\\d{1,2}:\\d{2})/,
+          /发布于\\s*(\\d+\\s*(?:分钟前|小时前))/,
+          /发布于\\s*(\\d{1,2}:\\d{2}(?::\\d{2})?)/,
+        ];
+        for (const pattern of publishedMarkerPatterns) {
+          const matched = source.match(pattern);
+          if (matched?.[1]) return matched[1];
+        }
         const patterns = [
           /\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}\\s+\\d{1,2}:\\d{2}(?::\\d{2})?/,
           /\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}/,
@@ -588,6 +757,130 @@ function buildDetailExtractionScript(commentScope = "none") {
   `;
 }
 
+function buildVerificationInspectionPayloadScript() {
+  return `
+    (() => {
+      const textPattern = /璁块棶楠岃瘉|璇锋寜浣忔粦鍧梶鎷栧姩鍒版渶鍙宠竟|涓轰簡鏇村ソ鐨勮闂綋楠寍鍗冲彲缁х画璁块棶缃戦〉|鍒寮€|婊戝潡|楠岃瘉/;
+      const elements = Array.from(document.querySelectorAll("div, span, button, section"));
+      const hintNode = elements.find((node) => textPattern.test((node.innerText || "").replace(/\\s+/g, "")));
+      if (!hintNode) return null;
+
+      const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+      const container = hintNode.closest("section, article, main, div") || hintNode.parentElement || document.body;
+      const nodes = Array.from((container || document.body).querySelectorAll("div, span, button, a"));
+      const candidates = nodes
+        .map((node) => {
+          const rect = node.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) return null;
+          const style = window.getComputedStyle(node);
+          return {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+            text: (node.innerText || "").trim(),
+            background: style.backgroundColor || ""
+          };
+        })
+        .filter(Boolean);
+
+      const regionRect = (container || hintNode).getBoundingClientRect();
+      return {
+        candidates,
+        region: {
+          left: Math.max(0, regionRect.left - 40),
+          top: Math.max(0, regionRect.top - 40),
+          width: Math.min(viewportWidth, regionRect.width + 120),
+          height: Math.min(viewportHeight, Math.max(160, regionRect.height + 160))
+        },
+        viewport: {
+          width: viewportWidth,
+          height: viewportHeight
+        }
+      };
+    })()
+  `;
+}
+
+function buildVisualVerificationAnalysisScript(dataUrl) {
+  return `
+    (async () => {
+      const image = new Image();
+      const loadImage = new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = () => reject(new Error("visual verification image load failed"));
+      });
+      image.src = ${JSON.stringify(dataUrl)};
+      await loadImage;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext("2d");
+      context.drawImage(image, 0, 0);
+
+      const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+      const isOrange = (offset) => {
+        const r = data[offset];
+        const g = data[offset + 1];
+        const b = data[offset + 2];
+        const a = data[offset + 3];
+        return a >= 180 && r >= 210 && g >= 80 && g <= 190 && b <= 110;
+      };
+      const isGrayTrack = (offset) => {
+        const r = data[offset];
+        const g = data[offset + 1];
+        const b = data[offset + 2];
+        const a = data[offset + 3];
+        const spread = Math.max(r, g, b) - Math.min(r, g, b);
+        return a >= 180 && spread <= 18 && r >= 210 && r <= 245;
+      };
+
+      const orangeBox = { left: width, top: height, right: -1, bottom: -1 };
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          const offset = (y * width + x) * 4;
+          if (!isOrange(offset)) continue;
+          if (x < orangeBox.left) orangeBox.left = x;
+          if (y < orangeBox.top) orangeBox.top = y;
+          if (x > orangeBox.right) orangeBox.right = x;
+          if (y > orangeBox.bottom) orangeBox.bottom = y;
+        }
+      }
+
+      if (orangeBox.right < orangeBox.left || orangeBox.bottom < orangeBox.top) return null;
+
+      const searchTop = Math.max(0, orangeBox.top - 8);
+      const searchBottom = Math.min(height - 1, orangeBox.bottom + 8);
+      const trackBox = { left: width, top: height, right: -1, bottom: -1 };
+      for (let y = searchTop; y <= searchBottom; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          const offset = (y * width + x) * 4;
+          if (!isGrayTrack(offset)) continue;
+          if (x < trackBox.left) trackBox.left = x;
+          if (y < trackBox.top) trackBox.top = y;
+          if (x > trackBox.right) trackBox.right = x;
+          if (y > trackBox.bottom) trackBox.bottom = y;
+        }
+      }
+
+      if (trackBox.right < trackBox.left || trackBox.bottom < trackBox.top) return null;
+      return { orangeBox, trackBox };
+    })()
+  `;
+}
+
+function buildVerificationClip(region, viewport) {
+  if (!region || !viewport) return null;
+  const left = clamp(Math.floor(Number(region.left) || 0), 0, Math.max(0, Number(viewport.width) || 0));
+  const top = clamp(Math.floor(Number(region.top) || 0), 0, Math.max(0, Number(viewport.height) || 0));
+  const width = clamp(Math.ceil(Number(region.width) || 0), 60, Math.max(60, (Number(viewport.width) || 0) - left));
+  const height = clamp(Math.ceil(Number(region.height) || 0), 60, Math.max(60, (Number(viewport.height) || 0) - top));
+  if (width <= 0 || height <= 0) return null;
+  return { left, top, width, height };
+}
+
 function buildClickNextColumnPageScript() {
   return `
     (() => {
@@ -682,15 +975,50 @@ async function inspectCurrentPage(cdp, sessionId) {
 }
 
 async function inspectVerificationWidget(cdp, sessionId) {
-  const widget = await evaluateJson(cdp, sessionId, buildVerificationWidgetInspectionScript(), false);
-  if (!widget) return null;
+  const payload = await evaluateJson(cdp, sessionId, buildVerificationInspectionPayloadScript(), false);
+  if (!payload) return null;
 
   return {
-    handleX: Number(widget.handleX),
-    handleY: Number(widget.handleY),
-    endX: Number(widget.endX),
-    endY: Number(widget.endY),
+    widget: selectBestVerificationWidget(payload.candidates || []),
+    clip: buildVerificationClip(payload.region, payload.viewport),
   };
+}
+
+async function attemptVisualVerification(cdp, sessionId, clip) {
+  if (!clip) return null;
+  const screenshot = await cdp.send(
+    "Page.captureScreenshot",
+    {
+      format: "png",
+      clip: {
+        x: clip.left,
+        y: clip.top,
+        width: clip.width,
+        height: clip.height,
+        scale: 1,
+      },
+      fromSurface: true,
+      optimizeForSpeed: true,
+    },
+    { sessionId }
+  );
+  const data = String(screenshot?.data || "").trim();
+  if (!data) return null;
+
+  const visual = await evaluateJson(
+    cdp,
+    sessionId,
+    buildVisualVerificationAnalysisScript(`data:image/png;base64,${data}`),
+    true
+  );
+  if (!visual?.orangeBox || !visual?.trackBox) return null;
+
+  return buildVisualVerificationGeometry({
+    clipLeft: clip.left,
+    clipTop: clip.top,
+    orangeBox: visual.orangeBox,
+    trackBox: visual.trackBox,
+  });
 }
 
 async function dispatchMouseDragPath(cdp, sessionId, dragPath) {
@@ -754,15 +1082,31 @@ async function attemptAutoVerification(cdp, sessionId, maxAttempts = 2) {
     process.stderr.write(`[extract_xueqiu_posts] attempting automatic slider verification (${attempt}/${maxAttempts})\n`);
 
     let widget = null;
+    let clip = null;
     try {
       await waitForDocumentReady(cdp, sessionId, 5_000);
-      widget = await inspectVerificationWidget(cdp, sessionId);
+      const inspection = await inspectVerificationWidget(cdp, sessionId);
+      widget = inspection?.widget || null;
+      clip = inspection?.clip || null;
     } catch {
       widget = null;
+      clip = null;
     }
 
     if (!widget) {
-      process.stderr.write("[extract_xueqiu_posts] automatic slider verification could not locate a stable widget\n");
+      try {
+        widget = await attemptVisualVerification(cdp, sessionId, clip);
+      } catch (error) {
+        process.stderr.write(
+          `[extract_xueqiu_posts] visual verification fallback failed: ${
+            error instanceof Error ? error.message : String(error)
+          }\n`
+        );
+      }
+    }
+
+    if (!widget) {
+      process.stderr.write("[extract_xueqiu_posts] automatic slider verification could not locate a stable widget or visual track\n");
       continue;
     }
 

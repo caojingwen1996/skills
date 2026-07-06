@@ -28,7 +28,7 @@ These situations require explicit operator visibility and must not be silently i
 
 4. Allow human recovery
 
-- when a Xueqiu verification page appears, first let the script automatically attempt the slider verification when configured
+- when a Xueqiu verification page appears, first let the script automatically attempt DOM-based slider detection and dragging; if that cannot locate a stable control, let it try the screenshot-based visual fallback before manual recovery
 - when login or page issues appear, keep the current automation Chrome window open and let the operator recover in that same window first
 - once login or page issues are resolved inside the automation Chrome window, the current extraction pass should continue automatically when possible
 - only if the wait window times out or recovery still fails should the operator fall back to a same-day rerun

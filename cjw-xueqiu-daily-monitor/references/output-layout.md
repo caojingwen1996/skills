@@ -2,26 +2,24 @@
 
 All outputs are organized under the configured output root declared in `EXTEND.md`.
 
-The same directory structure applies under that root.
-
 ## Directory layers
 
 ```text
 {output-root}/
 └── {yyyymmdd}/
-    ├── {author}/
-    │   ├── *.txt
-    │   ├── state.json
-    │   ├── task.log
-    │   ├── processing/
-    │   └── summary.md
+    └── {author}/
+        ├── *.md
+        ├── state.json
+        ├── task.log
+        ├── processing/
+        └── summary.md
 ```
 
-## Author layer: raw capture and per-author outputs
+## Author layer
 
 Each author directory stores one account's artifacts for one date:
 
-- `*.txt` raw files
+- `*.md` raw files
 - `state.json`
 - `task.log`
 - `processing/`
@@ -30,11 +28,11 @@ Each author directory stores one account's artifacts for one date:
 Rules:
 
 - keep one state file and one log per account-date
-- keep raw `.txt` files at the author directory root
+- keep raw Markdown files at the author directory root
 - keep per-author intermediate analysis under `{yyyymmdd}/{author}/processing/`
 - keep the per-author final Markdown at `{yyyymmdd}/{author}/summary.md`
 
-## Per-author processing layer: intermediate analysis
+## Per-author processing layer
 
 Intermediate files must live under:
 
@@ -56,19 +54,24 @@ Final Markdown results must live at:
 {output-root}/{yyyymmdd}/{author}/summary.md
 ```
 
-Current final outputs:
-
-- one `summary.md` per author
-
-Rules:
-
-- keep final readable Markdown only
-- do not write intermediate JSON or analysis artifacts beside these Markdown files
-
 ## Completion check
 
 A correct output root should make it easy to answer:
 
-- where the raw files were saved
+- where the raw Markdown files were saved
 - which intermediate artifacts were generated
 - where the final Markdown results live
+
+## Day-level daily brief
+
+In addition to each author's `summary.md`, keep one whole-day brief at:
+
+```text
+{output-root}/{yyyymmdd}/daily_brief.md
+```
+
+Rules:
+
+- `daily_brief.md` lives under the date root, not inside an author directory
+- it is generated after per-author `summary.md` files are complete
+- it synthesizes the current date's saved articles across all authors

@@ -31,6 +31,7 @@ class PostRecord:
     publish_date: str
     url: str
     author_name: str
+    platform: str
     content: str
     author_comments: list[dict[str, str]]
     fetched_at: str
@@ -52,29 +53,29 @@ class TaskSummary:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="将已提取的雪球帖子写入日期目录下的原始文本文件。")
-    parser.add_argument("--input-file", required=True, help="已提取帖子 JSON 文件，内容必须是数组")
-    parser.add_argument("--author-name", help="作者名；未传时优先从 JSON 中读取")
-    parser.add_argument("--account-url", help="账号主页链接，仅用于任务摘要")
-    parser.add_argument("--date", help="目标日期，格式 YYYY-MM-DD，默认当天")
-    parser.add_argument("--output-dir", help="输出根目录；未传时从 EXTEND.md 读取")
+    parser = argparse.ArgumentParser(description="Save extracted platform posts as per-author Markdown raw files.")
+    parser.add_argument("--input-file", required=True, help="JSON file containing a list of extracted posts")
+    parser.add_argument("--author-name", help="Explicit author name override")
+    parser.add_argument("--account-url", help="Homepage URL for summary output")
+    parser.add_argument("--date", help="Target date in YYYY-MM-DD format")
+    parser.add_argument("--output-dir", help="Output root; defaults to EXTEND.md preferred output root")
     parser.add_argument(
         "--date-source",
         choices=("target", "post"),
         default="target",
-        help="目录日期来源；target 使用 --date，post 使用每篇文章发布时间",
+        help="Use target date or each post's publish date for the output directory date",
     )
     parser.add_argument(
         "--date-filter",
         choices=("target-date", "off"),
         default="target-date",
-        help="是否只保存目标日期内容",
+        help="Whether to keep only posts matching the target date",
     )
     parser.add_argument(
         "--layout",
         choices=("date-author", "author-root-date"),
         default="date-author",
-        help="输出结构；author-root-date 表示 output-dir 已经是作者根目录",
+        help="Directory layout under the output root",
     )
     return parser.parse_args()
 
@@ -143,30 +144,23 @@ def parse_publish_datetime(raw_text: str, target_date: date) -> tuple[date | Non
     month_day_match = re.search(r"(\d{1,2})[-/](\d{1,2})\s+(\d{1,2}:\d{2}(?::\d{2})?)", normalized)
     if month_day_match:
         month, day_value, time_text = month_day_match.groups()
-        hour_minute = datetime.strptime(time_text, "%H:%M:%S" if time_text.count(":") == 2 else "%H:%M")
+        time_value = datetime.strptime(time_text, "%H:%M:%S" if time_text.count(":") == 2 else "%H:%M")
         parsed = datetime(
             target_date.year,
             int(month),
             int(day_value),
-            hour_minute.hour,
-            hour_minute.minute,
-            hour_minute.second,
+            time_value.hour,
+            time_value.minute,
+            time_value.second,
         )
-        return parsed.date(), parsed.strftime("%Y-%m-%d %H:%M:%S")
-
-    chinese_match = re.search(r"(\d{1,2})-(\d{1,2})\s+(\d{1,2}:\d{2})", normalized)
-    if chinese_match:
-        month, day_value, time_text = chinese_match.groups()
-        hour_minute = datetime.strptime(time_text, "%H:%M")
-        parsed = datetime(target_date.year, int(month), int(day_value), hour_minute.hour, hour_minute.minute)
         return parsed.date(), parsed.strftime("%Y-%m-%d %H:%M:%S")
 
     relative_match = re.search(r"(今天|昨天|昨日)\s*(\d{1,2}:\d{2})", normalized)
     if relative_match:
         day_text, time_text = relative_match.groups()
         base_date = now.date() if day_text == "今天" else (now.date() - timedelta(days=1))
-        hour_minute = datetime.strptime(time_text, "%H:%M")
-        parsed = datetime(base_date.year, base_date.month, base_date.day, hour_minute.hour, hour_minute.minute)
+        time_value = datetime.strptime(time_text, "%H:%M")
+        parsed = datetime(base_date.year, base_date.month, base_date.day, time_value.hour, time_value.minute)
         return parsed.date(), parsed.strftime("%Y-%m-%d %H:%M:%S")
 
     if "刚刚" in normalized:
@@ -185,14 +179,14 @@ def parse_publish_datetime(raw_text: str, target_date: date) -> tuple[date | Non
     time_only_match = re.search(r"\b(\d{1,2}:\d{2}(?::\d{2})?)\b", normalized)
     if time_only_match:
         time_text = time_only_match.group(1)
-        hour_minute = datetime.strptime(time_text, "%H:%M:%S" if time_text.count(":") == 2 else "%H:%M")
+        time_value = datetime.strptime(time_text, "%H:%M:%S" if time_text.count(":") == 2 else "%H:%M")
         parsed = datetime(
             target_date.year,
             target_date.month,
             target_date.day,
-            hour_minute.hour,
-            hour_minute.minute,
-            hour_minute.second,
+            time_value.hour,
+            time_value.minute,
+            time_value.second,
         )
         return parsed.date(), parsed.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -210,7 +204,7 @@ def derive_author_name(explicit_author_name: str | None, account_url: str | None
         path_parts = [part for part in urlparse(account_url).path.split("/") if part]
         if path_parts:
             return path_parts[-1]
-    return "xueqiu_account"
+    return "platform_account"
 
 
 def load_input_items(path: str | Path) -> list[dict[str, Any]]:
@@ -247,6 +241,11 @@ def normalize_author_comments(payload: dict[str, Any]) -> list[dict[str, str]]:
     return comments
 
 
+def normalize_platform(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return text or "xueqiu"
+
+
 def normalize_extracted_post(
     payload: dict[str, Any],
     target_date: date,
@@ -259,6 +258,7 @@ def normalize_extracted_post(
     url = str(payload.get("url") or "").strip()
     content = str(payload.get("content") or "").strip()
     record_author = str(payload.get("author_name") or author_name).strip()
+    platform = normalize_platform(payload.get("platform"))
 
     if not title:
         raise ValueError("title is required")
@@ -278,7 +278,6 @@ def normalize_extracted_post(
         raise NonTargetDateError(f"帖子不属于目标日期: {published_date.isoformat()}")
 
     content_id = str(payload.get("content_id") or "").strip() or extract_content_id_from_url(url)
-
     return PostRecord(
         content_id=content_id,
         title=title,
@@ -286,6 +285,7 @@ def normalize_extracted_post(
         publish_date=published_date.isoformat(),
         url=url,
         author_name=record_author,
+        platform=platform,
         content=content,
         author_comments=normalize_author_comments(payload),
         fetched_at=datetime.now().isoformat(sep=" ", timespec="seconds"),
@@ -319,14 +319,15 @@ def load_existing_keys(result_dir: Path) -> set[str]:
     keys: set[str] = set()
     if not result_dir.exists():
         return keys
-    for path in result_dir.glob("*.txt"):
+    for path in result_dir.glob("*.md"):
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
         for line in text.splitlines():
             if line.startswith("内容ID：") or line.startswith("原始链接："):
-                keys.add(line.split("：", 1)[1].strip())
+                _, _, value = line.partition("：")
+                keys.add(value.strip())
     return keys
 
 
@@ -336,14 +337,7 @@ def format_author_comments(comments: list[dict[str, str]]) -> list[str]:
 
     lines = ["", "作者评论："]
     for index, comment in enumerate(comments, start=1):
-        meta_parts = [
-            value
-            for value in (
-                comment.get("published_at", "").strip(),
-                comment.get("author_name", "").strip(),
-            )
-            if value
-        ]
+        meta_parts = [part for part in (comment.get("published_at", "").strip(), comment.get("author_name", "").strip()) if part]
         prefix = f"{index}. "
         if meta_parts:
             prefix += f"[{' | '.join(meta_parts)}] "
@@ -404,6 +398,7 @@ def update_day_state(result_dir: Path, state: dict[str, Any], record: PostRecord
         "title": record.title,
         "published_at": record.publish_time,
         "url": record.url,
+        "platform": record.platform,
         "file_path": str(file_path),
         "saved_at": record.fetched_at,
     }
@@ -423,7 +418,7 @@ def append_processing_payload(result_dir: Path, payload: dict[str, Any]) -> None
     processing_dir = result_dir / "processing"
     processing_dir.mkdir(parents=True, exist_ok=True)
     output_file = processing_dir / "column-posts.json"
-    existing = []
+    existing: list[dict[str, Any]] = []
     if output_file.exists():
         try:
             loaded = json.loads(output_file.read_text(encoding="utf-8"))
@@ -450,7 +445,7 @@ def save_posts_to_files(records: list[PostRecord], result_dir: Path, logger: Any
     result_dir.mkdir(parents=True, exist_ok=True)
     for record in records:
         timestamp_part = record.publish_time[11:19].replace(":", "") if len(record.publish_time) >= 19 else "000000"
-        filename = f"{timestamp_part}_{slugify_filename(record.title)}_{record.content_id[:8]}.txt"
+        filename = f"{timestamp_part}_{slugify_filename(record.title)}_{record.content_id[:8]}.md"
         file_path = make_unique_path(result_dir / filename)
         body = "\n".join(
             [
@@ -460,15 +455,15 @@ def save_posts_to_files(records: list[PostRecord], result_dir: Path, logger: Any
                 f"发布日期：{record.publish_date}",
                 f"原始链接：{record.url}",
                 f"作者名称：{record.author_name}",
+                f"平台：{record.platform}",
                 f"抓取时间：{record.fetched_at}",
                 "",
                 "正文：",
                 record.content,
-                "",
                 *format_author_comments(record.author_comments),
             ]
         )
-        file_path.write_text(body, encoding="utf-8")
+        file_path.write_text(body + "\n", encoding="utf-8")
         saved_paths.append(file_path)
         write_log(logger, "info", f"保存成功: {file_path}")
     return saved_paths
@@ -502,34 +497,33 @@ def process_extracted_posts(args: argparse.Namespace) -> TaskSummary:
     layout = getattr(args, "layout", "date-author")
     account_url = str(getattr(args, "account_url", "") or "")
     default_result_dir, default_log_file = build_result_paths(output_root, author_name, target_date, layout=layout)
-    loggers: dict[Path, Any] = {}
-    logged_starts: set[Path] = set()
 
     summary = TaskSummary(
         account_url=account_url,
         target_date=target_date.isoformat(),
         author_name=author_name,
         candidate_count=len(input_items),
+        matched_count=0,
+        skipped_count=0,
+        success_count=0,
+        failure_count=0,
         result_dir=str(default_result_dir),
         log_file=str(default_log_file),
     )
+
+    loggers: dict[Path, Any] = {}
+    logged_starts: set[Path] = set()
+    saved_keys_by_dir: dict[Path, set[str]] = {}
 
     def logger_for(log_file: Path) -> Any:
         if log_file not in loggers:
             loggers[log_file] = init_logger(name=f"content_task.{abs(hash(str(log_file)))}", log_file=log_file)
         return loggers[log_file]
 
-    saved_keys_by_dir: dict[Path, set[str]] = {}
-
     try:
         for payload in input_items:
             try:
-                record = normalize_extracted_post(
-                    payload,
-                    target_date,
-                    author_name,
-                    date_filter=date_filter,
-                )
+                record = normalize_extracted_post(payload, target_date, author_name, date_filter=date_filter)
             except NonTargetDateError as exc:
                 summary.skipped_count += 1
                 logger = logger_for(default_log_file)
@@ -542,11 +536,7 @@ def process_extracted_posts(args: argparse.Namespace) -> TaskSummary:
                 write_log(logger, "error", f"输入记录无效: {exc}")
                 continue
 
-            record_date = (
-                datetime.strptime(record.publish_date, "%Y-%m-%d").date()
-                if date_source == "post"
-                else target_date
-            )
+            record_date = datetime.strptime(record.publish_date, "%Y-%m-%d").date() if date_source == "post" else target_date
             result_dir, log_file = build_result_paths(output_root, author_name, record_date, layout=layout)
             logger = logger_for(log_file)
             if log_file not in logged_starts:

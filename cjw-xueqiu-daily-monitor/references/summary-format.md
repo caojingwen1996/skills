@@ -27,7 +27,7 @@ Answer:
 
 Keep:
 
-- `3-7` numbered points by default
+- `3-7` author-attributed points by default, each starting with `作者名：`
 - one clear judgment per point
 - optional `证据：...` only when the point would otherwise be ambiguous
 

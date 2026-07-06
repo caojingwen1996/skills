@@ -11,12 +11,11 @@ Maintain accounts in the following format.
 ```md
 ## Accounts
 
-
-  
-  
-  - [enabled] name: 冰冰小美
+- [enabled] name: 冰冰小美
   url: https://xueqiu.com/u/7143769715
 
+- [enabled] name: 买股票的老木匠
+  url: https://xueqiu.com/u/3058599833
 ```
 
 Rules:
@@ -26,10 +25,30 @@ Rules:
 - only `enabled` accounts are included in the daily workflow
 - `note` is optional and for operator context only
 
+## Weibo Accounts
+
+Maintain Weibo homepage accounts in the following format.
+
+```md
+## Weibo Accounts
+
+- [enabled] name: 美股C姐
+  url: https://weibo.com/u/2826115500
+
+- [enabled] name: 墅姐
+  url: https://weibo.com/u/7796318711
+```
+
+Rules:
+
+- `name` is the human-readable account name
+- `url` must be the Weibo homepage URL in `https://weibo.com/u/...` format
+- only `enabled` accounts are included in the daily workflow
+- `note` is optional and for operator context only
+
 ## WeChat Article Links
 
-微信公众号抓取只支持文章链接入口，不支持公众号主页自动发现文章。
-
+微信公众号抓取支持两种入口：直接文章链接，以及可访问的公众号主页/历史消息页面 `--history-url`。
 When the operator provides WeChat article links, keep them as direct article URLs:
 
 ```md
@@ -46,6 +65,8 @@ Rules:
 - use `scripts/extract_wechat_articles.mjs` before `scripts/content_task.py`
 - extracted JSON must keep the fields used by the raw-file writer: `title`, `published_at`, `url`, `author_name`, and `content`
 
+For a history page, pass the page URL as `--history-url`. The page must already be accessible and contain discoverable `mp.weixin.qq.com/s...` article links.
+
 ## Start Rules
 
 The workflow is manual-start only.
@@ -61,11 +82,17 @@ Current rule set:
 
 The task date must always be explicit.
 
-If the operator uses the default confirmation option `3. 不需要修改，按今天抓取`, the workflow must resolve `today` to the current absolute date before capture starts.
+If the operator uses the default confirmation option `3. 不需要修改，按默认日期抓取`, the workflow must resolve the target date from the local start time before capture starts.
+
+Default target-date rule:
+
+- if the task starts at or after `00:00` and before `08:00` local time, resolve the target date to the previous calendar date
+- otherwise, resolve the target date to the current calendar date
 
 Typical usage:
 
-- default: collect today's posts
+- default before 08:00: collect yesterday's posts
+- default from 08:00 onward: collect today's posts
 - rerun: collect the same date again and only add new items
 - historical capture: manually specify an earlier date when needed
 
@@ -73,7 +100,7 @@ Typical usage:
 
 The current repo-local convention is:
 
-- preferred output root: `/Users/cjw/dev/Obsidian/{skill_name}`
+- preferred output root: `E:/caojingwen/obsidian/source/xueqiu_exports/cjw-xueqiu-daily-monitor`
 - preferred Chrome profile: `./scripts/.xueqiu-chrome-profile`
 - preferred automation Chrome startup script: `./scripts/start_automation_chrome.sh`
 - preferred automation Chrome CDP port: `9333`
@@ -84,7 +111,7 @@ These are operator defaults for this repository. Capture and summary commands mu
 
 Within the configured output root declared by `preferred output root`:
 
-- per-author raw capture files, `state.json`, `task.log`, intermediate analysis, and `summary.md` live under `{yyyymmdd}/{author}/`
+- per-author raw capture Markdown files, `state.json`, `task.log`, intermediate analysis, and `summary.md` live under `{yyyymmdd}/{author}/`
 - per-author intermediate artifacts live under `{yyyymmdd}/{author}/processing/`
 - the per-author final Markdown summary lives at `{yyyymmdd}/{author}/summary.md`
 
@@ -121,6 +148,6 @@ Then ask the user to choose one of these pre-start outcomes before capture begin
 
 1. 需要补充或更正配置
 2. 不需要修改，按指定日期抓取 `YYYY-MM-DD`
-3. 不需要修改，按今天抓取
+3. 不需要修改，按默认日期抓取
 
-If option `3` is chosen, convert `today` to the current absolute date before continuing.
+If option `3` is chosen, resolve the absolute target date with the default target-date rule before continuing.

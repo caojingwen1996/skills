@@ -20,7 +20,7 @@ description: 当用户需要手动抓取一个或多个指定雪球账号主页�
 - 同日重跑识别与去重
 - 原始文件和汇总输出要求
 
-也支持窄范围的微信公众号文章链接抓取：用户提供一个或多个 `mp.weixin.qq.com/s...` 文章链接时，使用 `scripts/extract_wechat_articles.mjs` 提取结构化 JSON，再复用现有保存流程写入原始 `.txt` 文件。当前不支持公众号主页自动发现文章。
+也支持微信公众号抓取：用户提供一个或多个 `mp.weixin.qq.com/s...` 文章链接时，使用 `scripts/extract_wechat_articles.mjs` 提取结构化 JSON；用户提供可访问的公众号主页/历史消息页面时，使用 `--history-url` 先发现文章链接，再复用现有保存流程写入原始 `.txt` 文件。
 
 当任务需要访问主页、复用登录态、进行页面交互或从雪球页面提取内容时，必须使用本 skill 自带的浏览器访问层：
 
@@ -159,7 +159,7 @@ description: 当用户需要手动抓取一个或多个指定雪球账号主页�
 
 ## 不要这样做
 
-- 不要自动启动抓取
+- 不要在普通手动 skill 调用中循环启动；但允许 Codex cron 自动化按配置单轮执行
 - 不要假设存在调度系统
 - 不要把同日重跑当作全新任务
 - 不要把中间文件混放在 `{yyyymmdd}/{author}/summary.md` 旁边
@@ -180,3 +180,13 @@ description: 当用户需要手动抓取一个或多个指定雪球账号主页�
 | [scripts/extract_xueqiu_posts.mjs](scripts/extract_xueqiu_posts.mjs) | 通过本地 CDP 访问雪球主页并提取结构化帖子 JSON |
 | [scripts/extract_wechat_articles.mjs](scripts/extract_wechat_articles.mjs) | 从微信公众号文章链接提取结构化文章 JSON |
 | [scripts/task_store.py](scripts/task_store.py) | 状态与去重工具 |
+## Weibo Extension
+
+This skill also supports 微博 homepage capture through `scripts/extract_weibo_posts.mjs`.
+Saved raw files are Markdown documents that later feed `summary.md`.
+
+## Daily Brief Extension
+
+After the per-author summaries are complete for one target date, also write one date-level brief to `{yyyymmdd}/daily_brief.md`.
+This brief must be based on the current saved articles for that date and should follow the structure reference in `demo.md`.
+Keep the existing per-author `summary.md` outputs unchanged; `daily_brief.md` is an additional whole-day synthesis.

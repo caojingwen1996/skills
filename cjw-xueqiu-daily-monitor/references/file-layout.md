@@ -4,26 +4,38 @@ This file describes naming and per-file structure inside the configured output r
 
 ## Daily raw artifacts
 
-For a task started on `2026-03-25` for account `某博主`, the workflow writes:
+For a task started on `2026-03-25` for one author, the workflow writes:
 
 - date root: `20260325/`
-- author directory: `20260325/某博主/`
-- log file: `20260325/某博主/task.log`
-- state file: `20260325/某博主/state.json`
+- author directory: `20260325/{author}/`
+- log file: `20260325/{author}/task.log`
+- state file: `20260325/{author}/state.json`
 
-The raw `.txt` files also live directly under `20260325/某博主/`.
+The raw `.md` files also live directly under `20260325/{author}/`.
 
 ## Raw result file format
 
-Each saved raw result file is a UTF-8 `.txt` file with at least:
+Each saved raw result file is a UTF-8 Markdown document with at least:
 
-```text
+```md
 标题：...
+内容ID：...
 发布时间：...
+发布日期：...
 原始链接：...
+作者名称：...
+平台：xueqiu|weibo|wechat
+抓取时间：...
 
 正文：
 ...
+```
+
+When author comments are present, append them as:
+
+```md
+作者评论：
+1. [发布时间 | 作者名称] ...
 ```
 
 Additional metadata may be included, but downstream summary generation must only rely on fields that are actually present in the saved file.
@@ -39,7 +51,6 @@ The JSON state file tracks:
 - `scan_round`
 - `success_count`
 - `failure_count`
-- `chrome_profile`
 - `log_file`
 - `result_dir`
 - `state_file`

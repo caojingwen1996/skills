@@ -1,0 +1,9 @@
+[extract_xueqiu_posts] verification page detected for https://xueqiu.com/7143769715/391277905
+[extract_xueqiu_posts] attempting automatic slider verification (1/2)
+[extract_xueqiu_posts] automatic slider verification could not locate a stable widget
+[extract_xueqiu_posts] attempting automatic slider verification (2/2)
+[extract_xueqiu_posts] automatic slider verification could not locate a stable widget
+[extract_xueqiu_posts] automatic slider verification did not clear the page
+[extract_xueqiu_posts] automatic verification failed, falling back to manual recovery
+[extract_xueqiu_posts] Manual action required: complete the Xueqiu verification in the automation Chrome window, then wait for the page to recover and extraction will continue automatically.
+[extract_xueqiu_posts] manual action resolved, resuming extraction
